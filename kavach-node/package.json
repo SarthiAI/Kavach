@@ -1,10 +1,10 @@
 {
   "name": "kavach-engine",
   "version": "0.1.0",
-  "description": "Compiled Rust engine for Kavach — native Node.js addon exposing the gate evaluator via napi-rs.",
+  "description": "Compiled Rust engine for Kavach, a native Node.js addon exposing the gate evaluator via napi-rs.",
   "main": "index.js",
   "types": "index.d.ts",
-  "license": "Apache-2.0",
+  "license": "SEE LICENSE IN ../LICENSE",
   "files": [
     "index.js",
     "index.d.ts",

@@ -266,4 +266,4 @@ Every `evaluate()` call crosses FFI into compiled Rust via napi-rs. The TypeScri
 
 ## License
 
-Apache-2.0.
+Elastic License 2.0. Source-available; free to use, embed, and modify for any purpose, including commercially. You may not offer Kavach itself as a hosted or managed service that competes with SarthiAI. See the [LICENSE](https://github.com/SarthiAI/Kavach/blob/main/LICENSE) file for the full text.

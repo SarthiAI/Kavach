@@ -13,8 +13,9 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
-repository = "https://github.com/kavach-rs/kavach"
+license = "LicenseRef-Elastic-2.0"
+license-file = "LICENSE"
+repository = "https://github.com/SarthiAI/Kavach"
 description = "Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems"
 
 [workspace.dependencies]

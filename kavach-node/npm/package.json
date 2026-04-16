@@ -9,7 +9,7 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": ["security", "ai-agents", "mcp", "post-quantum", "execution-boundary"],
-  "license": "Apache-2.0",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "dependencies": {
     "kavach-engine": "file:.."
   },
