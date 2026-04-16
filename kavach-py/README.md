@@ -1,6 +1,6 @@
 # kavach
 
-**Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems — Python SDK.**
+**Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems. Python SDK.**
 
 Kavach separates *possession of credentials* from *permission to act*. Every action passes through a gate that evaluates identity, policy, drift, and invariants before producing a verdict. All evaluation runs in compiled Rust via PyO3; this package is the idiomatic Python wrapper.
 
@@ -16,7 +16,7 @@ Action attempted ──▶ Gate (identity · policy · drift · invariants) ─�
 pip install kavach
 ```
 
-Wheels are published as `abi3` — a single wheel per platform covers CPython 3.10, 3.11, 3.12, and every future Python. Linux x86_64/aarch64, macOS x86_64/arm64, and Windows x64 are supported.
+Wheels are published as `abi3`. A single wheel per platform covers CPython 3.10, 3.11, 3.12, and every future Python. Linux x86_64/aarch64, macOS x86_64/arm64, and Windows x64 are supported.
 
 ---
 
@@ -54,7 +54,7 @@ else:
     print(f"blocked: [{verdict.code}] {verdict.evaluator}: {verdict.reason}")
 ```
 
-A policy set with no matching permit Refuses by default — there is no implicit allow.
+A policy set with no matching permit Refuses by default. There is no implicit allow.
 
 ---
 
@@ -146,12 +146,12 @@ kp = KavachKeyPair.generate()                  # no expiry
 kp = KavachKeyPair.generate_with_expiry(3600)  # 1-hour lifetime
 
 assert not kp.is_expired
-bundle = kp.public_keys()   # PublicKeyBundle — safe to share
+bundle = kp.public_keys()   # PublicKeyBundle, safe to share
 ```
 
 ### Signed audit chain
 
-Append-only, tamper-evident audit log. `verify` rejects tampered entries, wrong keys, and mode mismatches (e.g., a PQ-only verifier on a hybrid chain — a silent downgrade).
+Append-only, tamper-evident audit log. `verify` rejects tampered entries, wrong keys, and mode mismatches (e.g., a PQ-only verifier on a hybrid chain, which is a silent downgrade).
 
 ```python
 from kavach import AuditEntry, SignedAuditChain
@@ -172,7 +172,7 @@ SignedAuditChain.verify_jsonl(blob, kp.public_keys())
 
 ### Secure channel
 
-Hybrid-encrypted, PQ-signed byte channel between two peers. Sealed payloads are opaque — ship them over any transport.
+Hybrid-encrypted, PQ-signed byte channel between two peers. Sealed payloads are opaque; ship them over any transport.
 
 ```python
 from kavach import SecureChannel
@@ -228,7 +228,7 @@ verdict = gate.evaluate(
 )
 ```
 
-Missing geo with a threshold set still **fails closed** — the SDK does not silently bypass.
+Missing geo with a threshold set still **fails closed**. The SDK does not silently bypass.
 
 ### Policy hot reload
 
@@ -252,11 +252,11 @@ gate = Gate.from_file("kavach.toml", observe_only=True)
 
 Every `evaluate()` call crosses FFI into compiled Rust. The Python layer is pure wrappers. The engine implements:
 
-- **Policy** — TOML rules with conditions (`identity_kind`, `action`, `param_max`, `rate_limit`, `time_window` with optional timezone, etc.).
-- **Drift detectors** — IP/geo, session age, device, behavior.
-- **Invariants** — hard per-action limits that cannot be overridden by policy.
-- **Post-quantum crypto** — ML-DSA-65, ML-KEM-768, Ed25519, X25519, ChaCha20-Poly1305.
-- **Fail-closed** — any evaluator error, store failure, or broadcast issue errs on the side of Refuse.
+- **Policy:** TOML rules with conditions (`identity_kind`, `action`, `param_max`, `rate_limit`, `time_window` with optional timezone, etc.).
+- **Drift detectors:** IP / geo, session age, device, behavior.
+- **Invariants:** hard per-action limits that cannot be overridden by policy.
+- **Post-quantum crypto:** ML-DSA-65, ML-KEM-768, Ed25519, X25519, ChaCha20-Poly1305.
+- **Fail-closed:** any evaluator error, store failure, or broadcast issue errs on the side of Refuse.
 
 ---
 

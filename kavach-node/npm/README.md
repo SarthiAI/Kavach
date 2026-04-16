@@ -1,6 +1,6 @@
 # kavach
 
-**Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems — TypeScript SDK.**
+**Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems. TypeScript SDK.**
 
 Kavach separates *possession of credentials* from *permission to act*. Every action passes through a gate that evaluates identity, policy, drift, and invariants before producing a verdict. All evaluation runs in compiled Rust via napi-rs; this package is the idiomatic TypeScript wrapper.
 
@@ -54,7 +54,7 @@ if (verdict.isPermit) {
 }
 ```
 
-A policy set with no matching permit Refuses by default — there is no implicit allow.
+A policy set with no matching permit Refuses by default. There is no implicit allow.
 
 ---
 
@@ -150,12 +150,12 @@ const kp = KavachKeyPair.generate();                      // no expiry
 const kp2 = KavachKeyPair.generateWithExpiry(3600);       // 1-hour lifetime
 
 console.assert(!kp.isExpired);
-const bundle = kp.publicKeys();   // PublicKeyBundleView — safe to share
+const bundle = kp.publicKeys();   // PublicKeyBundleView, safe to share
 ```
 
 ### Signed audit chain
 
-Append-only, tamper-evident audit log. `verify` rejects tampered entries, wrong keys, and mode mismatches (e.g., a PQ-only verifier on a hybrid chain — a silent downgrade).
+Append-only, tamper-evident audit log. `verify` rejects tampered entries, wrong keys, and mode mismatches (e.g., a PQ-only verifier on a hybrid chain, which is a silent downgrade).
 
 ```typescript
 import { AuditEntry, SignedAuditChain } from 'kavach';
@@ -176,7 +176,7 @@ SignedAuditChain.verifyJsonl(blob, kp.publicKeys());
 
 ### Secure channel
 
-Hybrid-encrypted, PQ-signed byte channel between two peers. Sealed payloads are opaque — ship them over any transport.
+Hybrid-encrypted, PQ-signed byte channel between two peers. Sealed payloads are opaque; ship them over any transport.
 
 ```typescript
 import { SecureChannel, KavachKeyPair } from 'kavach';
@@ -232,7 +232,7 @@ const verdict = gate.evaluate({
 });
 ```
 
-Missing geo with a threshold set still **fails closed** — the SDK does not silently bypass.
+Missing geo with a threshold set still **fails closed**. The SDK does not silently bypass.
 
 ### Policy hot reload
 
@@ -256,11 +256,11 @@ const gate = Gate.fromFile('kavach.toml', { observeOnly: true });
 
 Every `evaluate()` call crosses FFI into compiled Rust via napi-rs. The TypeScript layer is pure wrappers. The engine implements:
 
-- **Policy** — TOML rules with conditions (`identity_kind`, `action`, `param_max`, `rate_limit`, `time_window` with optional timezone, etc.).
-- **Drift detectors** — IP/geo, session age, device, behavior.
-- **Invariants** — hard per-action limits that cannot be overridden by policy.
-- **Post-quantum crypto** — ML-DSA-65, ML-KEM-768, Ed25519, X25519, ChaCha20-Poly1305.
-- **Fail-closed** — any evaluator error, store failure, or broadcast issue errs on the side of Refuse.
+- **Policy:** TOML rules with conditions (`identity_kind`, `action`, `param_max`, `rate_limit`, `time_window` with optional timezone, etc.).
+- **Drift detectors:** IP / geo, session age, device, behavior.
+- **Invariants:** hard per-action limits that cannot be overridden by policy.
+- **Post-quantum crypto:** ML-DSA-65, ML-KEM-768, Ed25519, X25519, ChaCha20-Poly1305.
+- **Fail-closed:** any evaluator error, store failure, or broadcast issue errs on the side of Refuse.
 
 ---
 
