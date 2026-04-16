@@ -1,0 +1,105 @@
+# ──────────────────────────────────────────────────────────────────
+# Kavach Policy Configuration
+# ──────────────────────────────────────────────────────────────────
+# Policies are evaluated in priority order (lowest first).
+# First matching policy determines the verdict.
+# If no policy matches: DEFAULT DENY.
+# ──────────────────────────────────────────────────────────────────
+
+# ── AI Agent Policies ─────────────────────────────────────────────
+
+[[policy]]
+name = "agent_small_refunds"
+description = "AI agents can issue refunds up to ₹5,000"
+effect = "permit"
+priority = 10
+conditions = [
+    { identity_kind = "agent" },
+    { action = "issue_refund" },
+    { param_max = { field = "amount", max = 5000.0 } },
+    { rate_limit = { max = 50, window = "24h" } },
+    { session_age_max = "4h" },
+]
+
+[[policy]]
+name = "agent_read_orders"
+description = "AI agents can read order data"
+effect = "permit"
+priority = 10
+conditions = [
+    { identity_kind = "agent" },
+    { action = "read_order" },
+    { rate_limit = { max = 200, window = "1h" } },
+]
+
+[[policy]]
+name = "agent_block_large_refunds"
+description = "AI agents cannot issue refunds over ₹5,000"
+effect = "refuse"
+priority = 5
+conditions = [
+    { identity_kind = "agent" },
+    { action = "issue_refund" },
+    { param_min = { field = "amount", min = 5000.01 } },
+]
+
+# ── Human User Policies ──────────────────────────────────────────
+
+[[policy]]
+name = "support_refunds"
+description = "Support agents can issue refunds up to ₹50,000"
+effect = "permit"
+priority = 20
+conditions = [
+    { identity_role = "support_agent" },
+    { action = "issue_refund" },
+    { param_max = { field = "amount", max = 50000.0 } },
+    { rate_limit = { max = 100, window = "24h" } },
+]
+
+[[policy]]
+name = "support_read_all"
+description = "Support agents can read any order data"
+effect = "permit"
+priority = 20
+conditions = [
+    { identity_role = "support_agent" },
+    { action = "read_order" },
+]
+
+# ── Service Policies ─────────────────────────────────────────────
+
+[[policy]]
+name = "payment_service_refunds"
+description = "Payment service can process refunds of any size"
+effect = "permit"
+priority = 30
+conditions = [
+    { identity_kind = "service" },
+    { identity_id = "payment-service" },
+    { action = "issue_refund" },
+]
+
+# ── Admin Policies ───────────────────────────────────────────────
+
+[[policy]]
+name = "admin_all_actions"
+description = "Admins can perform any action"
+effect = "permit"
+priority = 100
+conditions = [
+    { identity_role = "admin" },
+]
+
+# ── Explicit Denials ─────────────────────────────────────────────
+
+[[policy]]
+name = "block_delete_production"
+description = "Nobody can delete production data outside business hours"
+effect = "refuse"
+priority = 1
+conditions = [
+    { action = "delete.*" },
+    { resource = "production/*" },
+    { time_window = "18:00-09:00" },
+]

@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "kavach-core",
+    "kavach-pq",
+    "kavach-mcp",
+    "kavach-http",
+    "kavach-py",
+    "kavach-node",
+    "kavach-redis",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/kavach-rs/kavach"
+description = "Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems"
+
+[workspace.dependencies]
+kavach-core = { path = "kavach-core" }
+kavach-pq = { path = "kavach-pq" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }

@@ -1,0 +1,212 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  fmt-clippy:
+    name: rustfmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Rust (stable + rustfmt, clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Export PYO3_PYTHON
+        shell: bash
+        run: echo "PYO3_PYTHON=${pythonLocation}/bin/python" >> "$GITHUB_ENV"
+
+      - name: cargo fmt --all --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy (strict — warnings fail CI)
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+
+  rust-test:
+    name: rust-test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+          - name: macos-x64
+            os: macos-13
+          - name: macos-arm64
+            os: macos-14
+          - name: windows-x64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: Export PYO3_PYTHON (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "PYO3_PYTHON=${pythonLocation}/bin/python" >> "$GITHUB_ENV"
+
+      - name: Export PYO3_PYTHON (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "PYO3_PYTHON=${pythonLocation}/python.exe" >> "$GITHUB_ENV"
+
+      - name: cargo build --workspace
+        run: cargo build --workspace
+
+      - name: cargo test --workspace (default features)
+        run: cargo test --workspace
+
+      - name: cargo test --workspace --all-features
+        run: cargo test --workspace --all-features
+
+  python-wheel:
+    name: python-wheel (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: auto
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: auto
+          - name: macos-x64
+            os: macos-13
+            target: x86_64-apple-darwin
+            manylinux: "off"
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            manylinux: "off"
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            manylinux: "off"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build abi3 wheel via maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out dist --manifest-path kavach-py/Cargo.toml
+          sccache: "true"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.name }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  node-napi:
+    name: node-napi (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - name: macos-x64
+            os: macos-13
+            target: x86_64-apple-darwin
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: node-${{ matrix.name }}
+          workspaces: kavach-node
+
+      - name: Export PYO3_PYTHON
+        shell: bash
+        run: echo "PYO3_PYTHON=${pythonLocation}/bin/python" >> "$GITHUB_ENV"
+
+      - name: Install napi-cli
+        working-directory: kavach-node
+        run: npm install
+
+      - name: Build native addon
+        working-directory: kavach-node
+        run: npx napi build --platform --release --target ${{ matrix.target }}
+
+      - name: Package TypeScript wrapper
+        working-directory: kavach-node/npm
+        run: |
+          npm install
+          npm run build
+
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-${{ matrix.name }}
+          path: |
+            kavach-node/*.node
+            kavach-node/index.js
+            kavach-node/index.d.ts
+          if-no-files-found: error

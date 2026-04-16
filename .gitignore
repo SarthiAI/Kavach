@@ -1,0 +1,36 @@
+# Rust
+/target
+Cargo.lock
+
+# Editor / OS
+*.swp
+*.swo
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+
+# Python native addon (built by maturin develop into the package dir)
+kavach-py/python/kavach/*.so
+
+# Node
+node_modules/
+dist/
+tests-dist/
+
+# napi-built addons (CI rebuilds per platform)
+*.node
+kavach-node/npm/npm/
+
+# e2e test state (keys + audit logs generated per run)
+e2e-tests/state/
+e2e-tests/state_hard/
+e2e-tests/state_trace/
+e2e-tests/audit.jsonl

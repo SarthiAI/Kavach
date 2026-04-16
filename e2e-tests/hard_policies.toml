@@ -1,0 +1,39 @@
+# Multi-role policy set for the hard suite.
+#
+# Three principals hit the same gate with different caps. The invariant
+# (hard_refund_cap = 50000) lives in code and applies to all of them — no
+# policy can override it.
+
+# AI support agents: up to ₹5,000 per refund, 100/day.
+[[policy]]
+name = "agent_refunds"
+effect = "permit"
+priority = 10
+conditions = [
+    { identity_kind = "agent" },
+    { action = "issue_refund" },
+    { param_max = { field = "amount", max = 5000.0 } },
+    { rate_limit = { max = 100, window = "24h" } },
+]
+
+# Human support reps: up to ₹50,000, 200/day.
+[[policy]]
+name = "support_rep_refunds"
+effect = "permit"
+priority = 20
+conditions = [
+    { identity_role = "support_agent" },
+    { action = "issue_refund" },
+    { param_max = { field = "amount", max = 50000.0 } },
+    { rate_limit = { max = 200, window = "24h" } },
+]
+
+# Admins: unlimited refunds (still capped by the in-code invariant at ₹50k).
+[[policy]]
+name = "admin_refunds"
+effect = "permit"
+priority = 30
+conditions = [
+    { identity_role = "admin" },
+    { action = "issue_refund" },
+]

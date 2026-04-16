@@ -1,0 +1,23 @@
+[package]
+name = "kavach-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Python bindings for Kavach — compiled Rust engine exposed via PyO3"
+
+[lib]
+name = "_kavach_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+kavach-core = { workspace = true }
+kavach-pq = { workspace = true }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+
+[build-dependencies]
+pyo3-build-config = "0.22"

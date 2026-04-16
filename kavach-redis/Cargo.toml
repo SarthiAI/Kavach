@@ -1,0 +1,23 @@
+[package]
+name = "kavach-redis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Redis-backed implementations of Kavach's distributed stores and invalidation broadcaster"
+
+[dependencies]
+kavach-core = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+futures-util = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "macros", "rt-multi-thread"] }
+chrono = { workspace = true }

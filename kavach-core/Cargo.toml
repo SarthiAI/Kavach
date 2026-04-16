@@ -1,0 +1,30 @@
+[package]
+name = "kavach-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core execution boundary engine — gate, verdicts, identity, policy, drift, invariants"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+
+# Hot-reload file watcher — opt-in so projects that don't need it don't
+# pay the `notify` build cost.
+notify = { version = "6", optional = true }
+
+[features]
+default = []
+# Enables the policy file watcher helper (`spawn_policy_watcher`).
+watcher = ["dep:notify"]
+
+[dev-dependencies]
+tempfile = "3"

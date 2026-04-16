@@ -1,0 +1,20 @@
+{
+  "name": "kavach",
+  "version": "0.1.0",
+  "description": "Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["security", "ai-agents", "mcp", "post-quantum", "execution-boundary"],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "kavach-engine": "file:.."
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

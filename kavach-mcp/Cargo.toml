@@ -1,0 +1,16 @@
+[package]
+name = "kavach-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Kavach middleware for MCP servers — gate every AI agent tool call"
+
+[dependencies]
+kavach-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
