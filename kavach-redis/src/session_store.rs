@@ -52,8 +52,14 @@ impl RedisSessionStore {
                 "ttl_secs must be > 0 (Redis treats 0 as expire-now)".into(),
             ));
         }
-        let conn = ConnectionManager::new(client)
+        let conn = tokio::time::timeout(crate::CONNECT_TIMEOUT, ConnectionManager::new(client))
             .await
+            .map_err(|_| {
+                SessionStoreError::BackendUnavailable(format!(
+                    "redis connect timed out after {:?}",
+                    crate::CONNECT_TIMEOUT
+                ))
+            })?
             .map_err(|e| SessionStoreError::BackendUnavailable(e.to_string()))?;
         Ok(Self { conn, ttl_secs })
     }

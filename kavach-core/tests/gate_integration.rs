@@ -291,6 +291,171 @@ conditions = [{ action = "issue_refund" }]
         .is_refuse());
 }
 
+// ── Param-condition fail-closed semantics (fixed 2026-04-17) ─────────
+//
+// `ParamMax` / `ParamMin` originally `unwrap_or(true)` on a missing
+// field, meaning a policy like `{ param_min = { field = "approval",
+// min = 1.0 } }` would match any context that did not include the
+// `approval` key — effectively permitting a gate that looked like it
+// required explicit approval. That's fail-open inside an otherwise
+// fail-closed product. These tests pin the corrected semantics: a
+// missing field makes the condition false, the policy stops matching,
+// and Kavach's default-deny floor takes over.
+
+fn ctx_without_amount(principal_id: &str, roles: Vec<&str>, action: &str) -> ActionContext {
+    let principal = Principal {
+        id: principal_id.to_string(),
+        kind: PrincipalKind::Agent,
+        roles: roles.into_iter().map(String::from).collect(),
+        credentials_issued_at: chrono::Utc::now(),
+        display_name: None,
+    };
+    // Note: ActionDescriptor::new leaves params empty — no `.with_param(...)`.
+    let desc = ActionDescriptor::new(action);
+    ActionContext::new(principal, desc, SessionState::new(), EnvContext::default())
+}
+
+#[tokio::test]
+async fn param_max_on_missing_field_fails_closed() {
+    let toml = r#"
+[[policy]]
+name = "permit_small_refunds"
+effect = "permit"
+conditions = [
+    { identity_role = "support" },
+    { action = "issue_refund" },
+    { param_max = { field = "amount", max = 500.0 } },
+]
+"#;
+    let gate = build_gate(toml, Vec::new());
+    let verdict = gate
+        .evaluate(&ctx_without_amount("agent-alice", vec!["support"], "issue_refund"))
+        .await;
+    assert!(
+        verdict.is_refuse(),
+        "missing `amount` must refuse (fail-closed), got {verdict:?}"
+    );
+}
+
+#[tokio::test]
+async fn param_min_on_missing_field_fails_closed() {
+    // A policy requiring manager approval (param_min approval ≥ 1) on a
+    // context that carries NO `approval` field must refuse. Previously
+    // this permitted vacuously — the headline correctness bug.
+    let toml = r#"
+[[policy]]
+name = "permit_only_with_approval"
+effect = "permit"
+conditions = [
+    { identity_role = "support" },
+    { action = "issue_refund" },
+    { param_min = { field = "manager_approval", min = 1.0 } },
+]
+"#;
+    let gate = build_gate(toml, Vec::new());
+    let verdict = gate
+        .evaluate(&ctx_without_amount("agent-alice", vec!["support"], "issue_refund"))
+        .await;
+    assert!(
+        verdict.is_refuse(),
+        "missing approval must refuse, got {verdict:?}"
+    );
+}
+
+#[tokio::test]
+async fn param_max_present_under_limit_still_permits() {
+    // Control case — when the field IS present and under the limit,
+    // the condition passes and the policy permits. This guards against
+    // overcorrecting the fail-closed fix into always-refusing.
+    let toml = r#"
+[[policy]]
+name = "permit_small_refunds"
+effect = "permit"
+conditions = [
+    { identity_role = "support" },
+    { action = "issue_refund" },
+    { param_max = { field = "amount", max = 500.0 } },
+]
+"#;
+    let gate = build_gate(toml, Vec::new());
+    // `ctx` helper always sets amount = 100.0 — well under the 500 cap.
+    let verdict = gate
+        .evaluate(&ctx("agent-alice", vec!["support"], "issue_refund"))
+        .await;
+    assert!(
+        verdict.is_permit(),
+        "amount=100 under cap=500 must permit, got {verdict:?}"
+    );
+}
+
+#[tokio::test]
+async fn param_min_present_satisfies_condition() {
+    // Control case for ParamMin: condition met → permit.
+    let toml = r#"
+[[policy]]
+name = "permit_only_with_approval"
+effect = "permit"
+conditions = [
+    { identity_role = "support" },
+    { action = "issue_refund" },
+    { param_min = { field = "manager_approval", min = 1.0 } },
+]
+"#;
+    let gate = build_gate(toml, Vec::new());
+
+    let principal = Principal {
+        id: "agent-alice".to_string(),
+        kind: PrincipalKind::Agent,
+        roles: vec!["support".to_string()],
+        credentials_issued_at: chrono::Utc::now(),
+        display_name: None,
+    };
+    let desc = ActionDescriptor::new("issue_refund")
+        .with_param("manager_approval", json!(1.0));
+    let c = ActionContext::new(principal, desc, SessionState::new(), EnvContext::default());
+
+    let verdict = gate.evaluate(&c).await;
+    assert!(
+        verdict.is_permit(),
+        "approval=1.0 must satisfy param_min>=1.0, got {verdict:?}"
+    );
+}
+
+#[tokio::test]
+async fn param_min_below_limit_refuses() {
+    // Explicit 0.0 — the "negative gating" pattern consumers should
+    // now rely on. 0.0 < 1.0 fails the condition → policy doesn't
+    // match → default-deny → refuse.
+    let toml = r#"
+[[policy]]
+name = "permit_only_with_approval"
+effect = "permit"
+conditions = [
+    { identity_role = "support" },
+    { action = "issue_refund" },
+    { param_min = { field = "manager_approval", min = 1.0 } },
+]
+"#;
+    let gate = build_gate(toml, Vec::new());
+
+    let principal = Principal {
+        id: "agent-alice".to_string(),
+        kind: PrincipalKind::Agent,
+        roles: vec!["support".to_string()],
+        credentials_issued_at: chrono::Utc::now(),
+        display_name: None,
+    };
+    let desc = ActionDescriptor::new("issue_refund")
+        .with_param("manager_approval", json!(0.0));
+    let c = ActionContext::new(principal, desc, SessionState::new(), EnvContext::default());
+
+    let verdict = gate.evaluate(&c).await;
+    assert!(
+        verdict.is_refuse(),
+        "approval=0.0 must fail param_min>=1.0, got {verdict:?}"
+    );
+}
+
 #[tokio::test]
 async fn guarded_is_only_constructible_via_gate() {
     // This test is compile-time in spirit: if the line below compiled,

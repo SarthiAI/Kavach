@@ -20,6 +20,9 @@ import {
   AuditEntry,
   DirectoryTokenVerifier,
   Gate,
+  InMemoryInvalidationBroadcaster,
+  InMemorySessionStore,
+  KavachInvalidated,
   KavachKeyPair,
   KavachRefused,
   McpKavachMiddleware,
@@ -27,6 +30,8 @@ import {
   PublicKeyDirectory,
   SecureChannel,
   SignedAuditChain,
+  spawnInvalidationListener,
+  type InvalidationScopeView,
   type PermitTokenInput,
 } from '../src/index';
 import { randomUUID } from 'crypto';
@@ -162,34 +167,36 @@ conditions = [
 const mcpGate = Gate.fromToml(mcpToml);
 const kv = new McpKavachMiddleware(mcpGate);
 
-const mcpPermit = kv.evaluateToolCall(
-  'issue_refund',
-  { orderId: 'ORD-1', amount: 500 },
-  { callerId: 'support-bot', callerKind: 'agent', sessionId: 'sess-1' },
-);
-check('small refund permitted', mcpPermit.isPermit, `kind=${mcpPermit.kind}`);
+async function runMcpMiddlewareTests(): Promise<void> {
+  const mcpPermit = await kv.evaluateToolCall(
+    'issue_refund',
+    { orderId: 'ORD-1', amount: 500 },
+    { callerId: 'support-bot', callerKind: 'agent', sessionId: 'sess-1' },
+  );
+  check('small refund permitted', mcpPermit.isPermit, `kind=${mcpPermit.kind}`);
 
-const mcpRefuse = kv.evaluateToolCall(
-  'issue_refund',
-  { orderId: 'ORD-2', amount: 25000 },
-  { callerId: 'support-bot', callerKind: 'agent', sessionId: 'sess-1' },
-);
-check('over-limit refund refused', mcpRefuse.isRefuse, `kind=${mcpRefuse.kind}`);
+  const mcpRefuse = await kv.evaluateToolCall(
+    'issue_refund',
+    { orderId: 'ORD-2', amount: 25000 },
+    { callerId: 'support-bot', callerKind: 'agent', sessionId: 'sess-1' },
+  );
+  check('over-limit refund refused', mcpRefuse.isRefuse, `kind=${mcpRefuse.kind}`);
 
-const mcpUnknown = kv.evaluateToolCall(
-  'delete_customer',
-  { customerId: 'c1' },
-  { callerId: 'support-bot', callerKind: 'agent' },
-);
-check('unknown tool refused (default deny)', mcpUnknown.isRefuse, `kind=${mcpUnknown.kind}`);
+  const mcpUnknown = await kv.evaluateToolCall(
+    'delete_customer',
+    { customerId: 'c1' },
+    { callerId: 'support-bot', callerKind: 'agent' },
+  );
+  check('unknown tool refused (default deny)', mcpUnknown.isRefuse, `kind=${mcpUnknown.kind}`);
 
-let mcpThrew = false;
-try {
-  kv.checkToolCall('delete_customer', {}, { callerId: 'bot', callerKind: 'agent' });
-} catch (e) {
-  if (e instanceof KavachRefused) mcpThrew = true;
+  let mcpThrew = false;
+  try {
+    await kv.checkToolCall('delete_customer', {}, { callerId: 'bot', callerKind: 'agent' });
+  } catch (e) {
+    if (e instanceof KavachRefused) mcpThrew = true;
+  }
+  check('checkToolCall throws KavachRefused', mcpThrew);
 }
-check('checkToolCall throws KavachRefused', mcpThrew);
 
 // ─── 6. guardTool wrapper ──────────────────────────────────────────────
 
@@ -1104,12 +1111,301 @@ const vNoCoords = tolerantGate.evaluate({
 });
 check('geo without lat/lon evaluates without crash', vNoCoords !== null);
 
+// ─── 16. Observe-only dispatch (P05 FIX-E) ──────────────────────────────
+//
+// Gate constructed with observeOnly:true must run the full evaluator
+// chain but always return Permit at the caller-facing layer. Pre-P05
+// the napi binding ignored this kwarg and returned the real refuse.
+
+section('[16] Gate(observeOnly) dispatches to evaluate_observe_only');
+
+const observeOnlyToml = `
+[[policy]]
+name = "small_amounts_only"
+effect = "permit"
+conditions = [
+    { identity_kind = "agent" },
+    { action = "probe" },
+    { param_max = { field = "amount", max = 100.0 } },
+]
+`;
+
+const strictGateO = Gate.fromToml(observeOnlyToml);
+const observeGateO = Gate.fromToml(observeOnlyToml, { observeOnly: true });
+
+const overAmountCtx = {
+  principalId: 'bot',
+  principalKind: 'agent' as const,
+  actionName: 'probe',
+  params: { amount: 5000 },
+};
+
+const strictVerdictO = strictGateO.evaluate(overAmountCtx);
+check('observe-only: strict gate refuses $5000',
+  strictVerdictO.isRefuse,
+  `kind=${strictVerdictO.kind}`);
+
+const observeVerdictO = observeGateO.evaluate(overAmountCtx);
+check('observe-only: observe gate returns Permit for the same input',
+  observeVerdictO.isPermit,
+  `kind=${observeVerdictO.kind}`);
+check('observe-only: caller-facing verdict carries a permit token',
+  observeVerdictO.permitToken !== null && observeVerdictO.permitToken !== undefined);
+
+// Under-limit sanity: both gates permit small amounts.
+const underAmountCtx = {
+  principalId: 'bot',
+  principalKind: 'agent' as const,
+  actionName: 'probe',
+  params: { amount: 50 },
+};
+check('observe-only: strict gate permits $50',
+  strictGateO.evaluate(underAmountCtx).isPermit);
+check('observe-only: observe gate permits $50',
+  observeGateO.evaluate(underAmountCtx).isPermit);
+
+// ─── 17. DirectoryTokenVerifier enforce_expiry (P05 FIX-F) ──────────────
+//
+// Verifier default refuses expired bundles; forensic callers
+// pass enforceExpiry: false to opt out.
+
+section('[17] DirectoryTokenVerifier.verify default enforces bundle expiry');
+
+async function runExpiryVerifyTests(): Promise<void> {
+  const shortKp17 = KavachKeyPair.generateWithExpiry(1);
+  const bundle17 = shortKp17.publicKeys();
+  const dir17 = PublicKeyDirectory.inMemory([bundle17]);
+  const ver17 = new DirectoryTokenVerifier(dir17, false);
+  const signer17 = PqTokenSigner.fromKeypairPqOnly(shortKp17);
+
+  const now17 = Math.floor(Date.now() / 1000);
+  const base17 = {
+    tokenId: randomUUID(),
+    evaluationId: randomUUID(),
+    issuedAt: now17,
+    expiresAt: now17 + 3600,
+    actionName: 'resource.read',
+    signature: null,
+  } as PermitTokenInput;
+  const sig17 = signer17.sign(base17);
+  const token17 = { ...base17, signature: sig17 } as PermitTokenInput;
+
+  // Fresh: default accepts.
+  let acceptedFresh = true;
+  try {
+    ver17.verify(token17, sig17);
+  } catch (_) {
+    acceptedFresh = false;
+  }
+  check('fresh kp: default verify (enforceExpiry=true) accepts', acceptedFresh);
+
+  // Sleep past expiry.
+  await new Promise(r => setTimeout(r, 1500));
+  check('kp is now expired', shortKp17.isExpired === true);
+
+  // Default refuses with "keypair expired" + bundle id in message.
+  let expiredRefused = false;
+  let expiredMsg = '';
+  try {
+    ver17.verify(token17, sig17);
+  } catch (e) {
+    expiredMsg = (e as Error).message;
+    expiredRefused = expiredMsg.includes('keypair expired') && expiredMsg.includes(bundle17.id);
+  }
+  check('expired kp: default verify refuses with "keypair expired" + bundle id',
+    expiredRefused, expiredMsg.slice(0, 120));
+
+  // enforceExpiry=false bypasses the lifecycle check.
+  let forensicAccepted = true;
+  try {
+    ver17.verify(token17, sig17, false);
+  } catch (_) {
+    forensicAccepted = false;
+  }
+  check('expired kp: enforceExpiry=false (forensic) accepts', forensicAccepted);
+}
+
+// ─── 18. InMemorySessionStore + McpKavachMiddleware fast-path (FIX-C) ───
+//
+// Session-store fast-path: after invalidateSession, the next tool
+// call on that session id is refused BEFORE the gate runs, with
+// evaluator = "session_store".
+
+section('[18] InMemorySessionStore + MCP middleware cross-replica fast-path');
+
+async function runSessionStoreTests(): Promise<void> {
+  const storeToml = `
+[[policy]]
+name = "agent_reads"
+effect = "permit"
+conditions = [
+    { identity_kind = "agent" },
+    { action = "data.read" },
+]
+`;
+  const gate18 = Gate.fromToml(storeToml);
+  const store18 = new InMemorySessionStore();
+  const mw18 = new McpKavachMiddleware(gate18, { sessionStore: store18 });
+
+  // Baseline: session sess-live works.
+  const v18a = await mw18.evaluateToolCall(
+    'data.read',
+    { rowId: 1 },
+    { callerId: 'bot-1', callerKind: 'agent', sessionId: 'sess-live' },
+  );
+  check('session store: live session permits', v18a.isPermit);
+
+  // Invalidate sess-live; next call returns Invalidate via fast-path.
+  await mw18.invalidateSession('sess-live');
+  check('session store: size = 1 after invalidate', store18.size === 1);
+
+  const v18b = await mw18.evaluateToolCall(
+    'data.read',
+    { rowId: 2 },
+    { callerId: 'bot-1', callerKind: 'agent', sessionId: 'sess-live' },
+  );
+  check('session store: invalidated session returns Invalidate', v18b.isInvalidate);
+  check('session store: evaluator = "session_store" (fast-path)',
+    v18b.evaluator === 'session_store',
+    `evaluator=${v18b.evaluator}`);
+
+  // checkToolCall throws KavachInvalidated on the same sessionId.
+  let threwInvalidated = false;
+  let invMsg = '';
+  try {
+    await mw18.checkToolCall(
+      'data.read',
+      { rowId: 3 },
+      { callerId: 'bot-1', callerKind: 'agent', sessionId: 'sess-live' },
+    );
+  } catch (e) {
+    if (e instanceof KavachInvalidated) {
+      threwInvalidated = true;
+      invMsg = e.message;
+    }
+  }
+  check('session store: checkToolCall throws KavachInvalidated for revoked session', threwInvalidated);
+  check('session store: invalidation error names the evaluator',
+    invMsg.includes('session_store'), invMsg.slice(0, 100));
+
+  // Fresh session (not in store) still works.
+  const v18c = await mw18.evaluateToolCall(
+    'data.read',
+    { rowId: 4 },
+    { callerId: 'bot-2', callerKind: 'agent', sessionId: 'sess-clean' },
+  );
+  check('session store: unrelated session unaffected by invalidation', v18c.isPermit);
+}
+
+// ─── 19. InMemoryInvalidationBroadcaster + spawnInvalidationListener (FIX-D) ───
+//
+// Broadcaster.publish reaches the listener callback. The callback
+// receives an InvalidationScopeView with target_kind / target_id /
+// reason / evaluator populated.
+
+section('[19] InMemoryInvalidationBroadcaster + spawnInvalidationListener fan-out');
+
+async function runBroadcasterTests(): Promise<void> {
+  const bc = new InMemoryInvalidationBroadcaster();
+  const received: InvalidationScopeView[] = [];
+  const handle = spawnInvalidationListener(bc, (scope: InvalidationScopeView) => {
+    received.push(scope);
+  });
+
+  // Give the listener a tick to subscribe.
+  await new Promise(r => setTimeout(r, 50));
+  check('broadcaster: subscriber_count >= 1 after listener spawned',
+    bc.subscriberCount >= 1, `count=${bc.subscriberCount}`);
+
+  // Publish three scopes (one per target kind).
+  const sessionId = randomUUID();
+  bc.publish('session', sessionId, 'stolen cookie', 'drift');
+  bc.publish('principal', 'agent-alpha', 'key rotation', 'manual');
+  bc.publish('role', 'admin', 'org-wide revoke');
+
+  // Listener runs on the event loop — wait briefly for the async fan-out.
+  await new Promise(r => setTimeout(r, 150));
+
+  check('broadcaster: listener received exactly 3 scopes', received.length === 3,
+    `got=${received.length}`);
+
+  const sessionScope = received.find(s => s.targetKind === 'session');
+  const principalScope = received.find(s => s.targetKind === 'principal');
+  const roleScope = received.find(s => s.targetKind === 'role');
+  check('broadcaster: session scope has target_id = the UUID',
+    sessionScope !== undefined && sessionScope.targetId === sessionId);
+  check('broadcaster: principal scope routes to "agent-alpha"',
+    principalScope !== undefined && principalScope.targetId === 'agent-alpha');
+  check('broadcaster: role scope routes to "admin"',
+    roleScope !== undefined && roleScope.targetId === 'admin');
+  check('broadcaster: session scope reason preserved',
+    sessionScope !== undefined && sessionScope.reason === 'stolen cookie');
+  check('broadcaster: session scope evaluator preserved',
+    sessionScope !== undefined && sessionScope.evaluator === 'drift');
+  check('broadcaster: role scope defaults evaluator to "manual" when omitted',
+    roleScope !== undefined && roleScope.evaluator === 'manual');
+
+  // abort() is idempotent + stops the task.
+  handle.abort();
+  handle.abort();   // no-op on second call
+  await new Promise(r => setTimeout(r, 50));
+  check('broadcaster: handle.isFinished true after abort', handle.isFinished === true);
+
+  // Gate.fromToml accepts the broadcaster and wires invalidations
+  // through it. Drift-triggered Invalidate surfaces on a second listener.
+  const bc2 = new InMemoryInvalidationBroadcaster();
+  const received2: InvalidationScopeView[] = [];
+  const handle2 = spawnInvalidationListener(bc2, s => received2.push(s));
+  await new Promise(r => setTimeout(r, 30));
+
+  const driftToml = `
+[[policy]]
+name = "allow_read"
+effect = "permit"
+conditions = [ { action = "data.read" } ]
+`;
+  const gate19 = Gate.fromToml(driftToml, { broadcaster: bc2 });
+
+  // Manually publish through the gate's broadcaster instance to prove
+  // the broadcaster arg threaded through.
+  bc2.publish('session', randomUUID(), 'gate wired it', 'manual');
+  await new Promise(r => setTimeout(r, 100));
+  check('broadcaster: Gate(broadcaster=bc) wires the SAME broadcaster object',
+    received2.length === 1, `got=${received2.length}`);
+  check('broadcaster: Gate evaluator_count unchanged by broadcaster kwarg',
+    gate19.evaluatorCount > 0);
+
+  handle2.abort();
+
+  // Invalid target_kind surfaces as an Error before publish.
+  let invalidRejected = false;
+  try {
+    bc.publish('tenant', 'whatever', 'bad call');
+  } catch (e) {
+    invalidRejected = (e as Error).message.includes('targetKind must be');
+  }
+  check('broadcaster: publish rejects bad target_kind', invalidRejected);
+
+  // Malformed session UUID rejected.
+  let uuidRejected = false;
+  try {
+    bc.publish('session', 'not-a-uuid', 'reason');
+  } catch (e) {
+    uuidRejected = (e as Error).message.includes('targetId not a UUID');
+  }
+  check('broadcaster: session publish rejects non-UUID targetId', uuidRejected);
+}
+
 // ─── Run and report ────────────────────────────────────────────────────
 
-runGuardTests()
+runMcpMiddlewareTests()
+  .then(() => runGuardTests())
   .then(() => runExpiryCheck())
+  .then(() => runExpiryVerifyTests())
+  .then(() => runSessionStoreTests())
+  .then(() => runBroadcasterTests())
   .catch((e) => {
-    console.error('guardTool tests raised:', e);
+    console.error('async tests raised:', e);
   })
   .finally(() => {
     console.log(`\n=== ${passed}/${total} checks passed ===`);

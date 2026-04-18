@@ -41,8 +41,14 @@ impl RedisRateLimitStore {
     /// across [`RedisRateLimitStore`], [`crate::RedisSessionStore`], and
     /// [`crate::RedisInvalidationBroadcaster`].
     pub async fn new(client: redis::Client) -> Result<Self, RateLimitStoreError> {
-        let conn = ConnectionManager::new(client)
+        let conn = tokio::time::timeout(crate::CONNECT_TIMEOUT, ConnectionManager::new(client))
             .await
+            .map_err(|_| {
+                RateLimitStoreError::BackendUnavailable(format!(
+                    "redis connect timed out after {:?}",
+                    crate::CONNECT_TIMEOUT
+                ))
+            })?
             .map_err(|e| RateLimitStoreError::BackendUnavailable(e.to_string()))?;
         Ok(Self { conn })
     }

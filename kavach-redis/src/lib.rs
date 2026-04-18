@@ -39,3 +39,14 @@ mod session_store;
 pub use broadcaster::{RedisBroadcasterError, RedisInvalidationBroadcaster};
 pub use rate_limit::RedisRateLimitStore;
 pub use session_store::RedisSessionStore;
+
+/// Bounded wait on the initial [`redis::aio::ConnectionManager::new`] handshake.
+///
+/// `ConnectionManager` is designed to retry forever — great for long-lived
+/// processes surviving transient Redis blips, catastrophic for start-up time
+/// when the URL is just wrong. Every `from_url` / `new` here wraps the
+/// handshake in a `tokio::time::timeout(CONNECT_TIMEOUT, ...)` so a bad URL
+/// surfaces as `BackendUnavailable` within seconds instead of hanging the
+/// caller (discovered during FIX-2 smoke testing when a typo'd URL froze a
+/// Python process indefinitely).
+pub(crate) const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);

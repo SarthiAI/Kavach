@@ -76,10 +76,19 @@ pub enum Condition {
     /// Action name must match (supports glob patterns: "refund.*").
     Action(String),
 
-    /// A numeric parameter must be at most this value.
+    /// A numeric parameter must be present AND at most this value.
+    ///
+    /// **Fail-closed on missing field**: if the action context has no
+    /// `params[field]`, the condition evaluates to `false` (the policy
+    /// does not match, and the gate's default-deny floor kicks in).
+    /// This matches the product's fail-closed contract — do not rely
+    /// on `ParamMax` to vacuously permit when a field is absent.
     ParamMax { field: String, max: f64 },
 
-    /// A numeric parameter must be at least this value.
+    /// A numeric parameter must be present AND at least this value.
+    ///
+    /// **Fail-closed on missing field**: same semantics as
+    /// [`Condition::ParamMax`] — a missing field fails the condition.
     ParamMin { field: String, min: f64 },
 
     /// A string parameter must match one of these values.
@@ -125,13 +134,13 @@ impl Condition {
                 .action
                 .param_as_f64(field)
                 .map(|v| v <= *max)
-                .unwrap_or(true), // Missing param doesn't fail this check
+                .unwrap_or(false), // fail-closed on missing field (see doc on variant)
 
             Condition::ParamMin { field, min } => ctx
                 .action
                 .param_as_f64(field)
                 .map(|v| v >= *min)
-                .unwrap_or(true),
+                .unwrap_or(false),
 
             Condition::ParamIn { field, values } => ctx
                 .action

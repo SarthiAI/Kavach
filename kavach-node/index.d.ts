@@ -56,6 +56,34 @@ export interface ActionContextInput {
    * tolerant-mode `GeoLocationDrift`.
    */
   originGeo?: GeoLocationInput
+  /**
+   * Explicit session-origin IP. When set, overrides the `ip`-derived
+   * default (`session.origin_ip = env.ip`) — lets callers model
+   * "session started from X, request from Y" for strict/tolerant
+   * `GeoLocationDrift`.
+   */
+  originIp?: string
+  /**
+   * Current device fingerprint (→ `EnvContext.device`). Combined
+   * with `originDevice`, feeds `DeviceDrift`.
+   */
+  device?: DeviceFingerprintInput
+  /**
+   * Session-origin device fingerprint (→ `SessionState.origin_device`).
+   * `DeviceDrift` fires when both sides are set and the hashes differ.
+   */
+  originDevice?: DeviceFingerprintInput
+  /**
+   * Unix-epoch seconds; synthesizes `SessionState.started_at`. Lets
+   * scenarios exercise `SessionAgeDrift` without waiting hours.
+   */
+  sessionStartedAt?: number
+  /**
+   * Synthesized `SessionState.action_count`. Combined with a
+   * synthesized `session_started_at`, feeds `BehaviorDrift`'s
+   * actions-per-minute calculation.
+   */
+  actionCount?: number
 }
 /**
  * Plain-object view of `kavach_core::GeoLocation`. `countryCode` is
@@ -68,6 +96,14 @@ export interface GeoLocationInput {
   city?: string
   latitude?: number
   longitude?: number
+}
+/**
+ * Plain-object view of `kavach_core::DeviceFingerprint`. `hash` is
+ * required; `description` is free-text for drift violation messages.
+ */
+export interface DeviceFingerprintInput {
+  hash: string
+  description?: string
 }
 export interface InvariantInput {
   name: string
@@ -108,6 +144,33 @@ export interface AuditEntryOptions {
   evaluationId?: string
   sessionId?: string
 }
+/**
+ * JS-visible view of a [`core::InvalidationScope`]. Passed as the
+ * sole argument to the callback registered via
+ * `spawnInvalidationListener`. `targetKind` is `"session"`,
+ * `"principal"`, or `"role"`; `targetId` is the matching id (UUID
+ * string for session, principal id for principal, role name for role).
+ */
+export interface InvalidationScopeView {
+  targetKind: string
+  targetId: string
+  reason: string
+  evaluator: string
+}
+/**
+ * Spawn a listener that calls `callback(scope)` for every
+ * invalidation published on `broadcaster`.
+ *
+ * `callback` is any JS function taking a single
+ * `InvalidationScopeView` argument. The callback runs on the Node
+ * event loop (ThreadsafeFunction); exceptions thrown inside the
+ * callback do NOT stop the listener — they surface through the
+ * napi error strategy.
+ *
+ * Returns an `InvalidationListenerHandle`; call `.abort()` to stop
+ * the task before the broadcaster's channel closes.
+ */
+export declare function spawnInvalidationListener(broadcaster: InMemoryInvalidationBroadcaster, callback: (...args: any[]) => any): InvalidationListenerHandle
 /**
  * A Kavach keypair — ML-DSA-65 + ML-KEM-768 + Ed25519 + X25519.
  *
@@ -264,7 +327,7 @@ export declare class KavachGate {
    * `currentGeo` and `originGeo` to carry latitude/longitude. Missing
    * geo with a threshold set fails closed.
    */
-  constructor(policyToml: string, invariants?: Array<InvariantInput> | undefined | null, observeOnly?: boolean | undefined | null, maxSessionActions?: number | undefined | null, enableDrift?: boolean | undefined | null, tokenSigner?: PqTokenSigner | undefined | null, geoDriftMaxKm?: number | undefined | null)
+  constructor(policyToml: string, invariants?: Array<InvariantInput> | undefined | null, observeOnly?: boolean | undefined | null, maxSessionActions?: number | undefined | null, enableDrift?: boolean | undefined | null, tokenSigner?: PqTokenSigner | undefined | null, geoDriftMaxKm?: number | undefined | null, broadcaster?: InMemoryInvalidationBroadcaster | undefined | null)
   /**
    * Hot-reload the policy set from a fresh TOML string.
    *
@@ -277,6 +340,12 @@ export declare class KavachGate {
    * Evaluate an action context. Returns a VerdictResult.
    *
    * Crosses into Rust for all evaluation: policy, drift, invariants.
+   * When the gate was configured with `observeOnly: true`, the full
+   * evaluator chain still runs and real Refuse/Invalidate verdicts
+   * still reach the audit sink and the broadcaster — but the
+   * caller-facing verdict is always Permit. Operators get full
+   * visibility of what the gate *would* do without production
+   * traffic being refused during a rollout.
    */
   evaluate(ctx: ActionContextInput): VerdictResult
   /** Number of evaluators in the gate chain. */
@@ -394,7 +463,54 @@ export declare class DirectoryTokenVerifier {
   /**
    * Verify `signature` against the supplied PermitToken fields.
    * Throws on any failure (envelope parse, algorithm mismatch,
-   * directory miss, signature invalid).
+   * directory miss, signature invalid, expired bundle).
+   *
+   * `enforceExpiry` (default `true`): reject verification if the
+   * resolved bundle's `expires_at` is in the past. This is the
+   * correct-by-default posture for an authorization gate — a
+   * rotated-out keypair MUST NOT authorise new actions even if
+   * its signature is still cryptographically valid. Pass
+   * `enforceExpiry: false` for historical forensic verification
+   * (re-checking an archived audit trail against a bundle that
+   * has since expired).
    */
-  verify(token: PermitTokenInput, signature: Buffer): void
+  verify(token: PermitTokenInput, signature: Buffer, enforceExpiry?: boolean | undefined | null): void
+}
+/**
+ * Process-local invalidation broadcaster — default backend when no
+ * Redis broadcaster is configured.
+ *
+ * Subscribers created via `spawnInvalidationListener` receive every
+ * `publish` that arrives *after* the subscription. Useful for
+ * single-node deployments that still want a uniform code path with
+ * the distributed broadcaster, and for smoke tests that exercise
+ * the broadcaster contract without standing up Redis.
+ */
+export declare class InMemoryInvalidationBroadcaster {
+  constructor()
+  /**
+   * Manually publish an invalidation. Real callers get this for
+   * free through `Gate.evaluate()` when an evaluator returns
+   * `Invalidate`; this method is here for tests / scenarios that
+   * want to exercise the subscribe path without routing a
+   * synthetic Invalidate through the gate.
+   *
+   * `targetKind` must be `"session"`, `"principal"`, or `"role"`.
+   * For `"session"`, `targetId` MUST be a valid UUID string.
+   */
+  publish(targetKind: string, targetId: string, reason: string, evaluator?: string | undefined | null): void
+  /** Live subscriber count (observability / tests). */
+  get subscriberCount(): number
+}
+/**
+ * Opaque handle for a running listener task spawned by
+ * `spawnInvalidationListener`. Integrator owns the lifecycle —
+ * the task exits on its own when the broadcaster's channel closes;
+ * call `abort()` to stop it sooner.
+ */
+export declare class InvalidationListenerHandle {
+  /** Stop the listener. Idempotent — calling twice is a no-op. */
+  abort(): void
+  /** True if the listener task has finished. */
+  get isFinished(): boolean
 }

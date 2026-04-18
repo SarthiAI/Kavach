@@ -1,12 +1,19 @@
 """Idiomatic Python wrapper around the Rust Gate."""
 
 from pathlib import Path
+from typing import Union
+
 from kavach._kavach_engine import (
     ActionContext,
     Gate as _RustGate,
+    InMemoryInvalidationBroadcaster,
     PqTokenSigner,
+    RedisInvalidationBroadcaster,
+    RedisRateLimitStore,
     Verdict,
 )
+
+BroadcasterBackend = Union[InMemoryInvalidationBroadcaster, RedisInvalidationBroadcaster]
 
 
 class Gate:
@@ -35,6 +42,8 @@ class Gate:
         enable_drift: bool = True,
         token_signer: PqTokenSigner | None = None,
         geo_drift_max_km: float | None = None,
+        rate_store: RedisRateLimitStore | None = None,
+        broadcaster: BroadcasterBackend | None = None,
     ) -> "Gate":
         """Create a gate from a TOML policy string.
 
@@ -52,6 +61,16 @@ class Gate:
                 IP changes within this distance are downgraded to Warning
                 (requires both current_geo and origin_geo with
                 latitude/longitude).
+            rate_store: Optional ``RedisRateLimitStore`` — swaps the
+                default in-memory rate counter for a Redis-backed one
+                that stays consistent across service replicas. Fail-closed
+                on any Redis error (a ``record`` failure refuses the
+                action).
+            broadcaster: Optional ``RedisInvalidationBroadcaster`` —
+                publishes ``Invalidate`` verdicts to a Redis Pub/Sub
+                channel so peer nodes drop the session locally. Publish
+                failures are logged but never downgrade the local
+                verdict (fail-closed locally, best-effort globally).
         """
         rg = _RustGate(
             policy_toml=policy_toml,
@@ -61,6 +80,8 @@ class Gate:
             enable_drift=enable_drift,
             token_signer=token_signer,
             geo_drift_max_km=geo_drift_max_km,
+            rate_store=rate_store,
+            broadcaster=broadcaster,
         )
         return cls(rg)
 
@@ -75,8 +96,10 @@ class Gate:
         enable_drift: bool = True,
         token_signer: PqTokenSigner | None = None,
         geo_drift_max_km: float | None = None,
+        rate_store: RedisRateLimitStore | None = None,
+        broadcaster: BroadcasterBackend | None = None,
     ) -> "Gate":
-        """Create a gate from a TOML policy file."""
+        """Create a gate from a TOML policy file. See ``from_toml`` for kwargs."""
         content = Path(path).read_text()
         return cls.from_toml(
             content,
@@ -86,6 +109,8 @@ class Gate:
             enable_drift=enable_drift,
             token_signer=token_signer,
             geo_drift_max_km=geo_drift_max_km,
+            rate_store=rate_store,
+            broadcaster=broadcaster,
         )
 
     def evaluate(self, ctx: ActionContext) -> Verdict:

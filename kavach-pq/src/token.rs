@@ -26,6 +26,7 @@
 use crate::directory::{KeyDirectoryError, PublicKeyDirectory};
 use crate::error::PqError;
 use crate::keys::{load_ml_dsa_signing_key, load_ml_dsa_verifying_key};
+use chrono::{DateTime, Utc};
 use ed25519_dalek::{
     Signature as Ed25519Signature, Signer as Ed25519Signer, SigningKey as Ed25519SigningKey,
     Verifier as Ed25519Verifier, VerifyingKey as Ed25519VerifyingKey,
@@ -308,6 +309,17 @@ pub enum DirectoryVerifyError {
     /// The signature did not verify against the looked-up key.
     #[error("signature verification failed: {0}")]
     SignatureInvalid(String),
+
+    /// The looked-up bundle's `expires_at` is in the past and the caller
+    /// asked `verify_with_expiry(..., enforce_expiry = true)`. Raised only
+    /// when the caller opts in; the unchecked entry point
+    /// [`DirectoryTokenVerifier::verify`] retains the prior pure-crypto
+    /// contract for backwards compatibility.
+    #[error("keypair expired: bundle '{key_id}' expired at {expired_at}")]
+    BundleExpired {
+        key_id: String,
+        expired_at: DateTime<Utc>,
+    },
 }
 
 impl DirectoryTokenVerifier {
@@ -330,11 +342,37 @@ impl DirectoryTokenVerifier {
     }
 
     /// Verify `token` against `signature` using a key looked up from the
-    /// directory by `key_id`.
+    /// directory by `key_id`. Pure cryptographic check — does NOT consult
+    /// the resolved bundle's `expires_at`. Use
+    /// [`Self::verify_with_expiry`] when you want the verifier to refuse
+    /// tokens whose signing bundle has expired.
     pub async fn verify(
         &self,
         token: &PermitToken,
         signature: &[u8],
+    ) -> Result<(), DirectoryVerifyError> {
+        self.verify_with_expiry(token, signature, false).await
+    }
+
+    /// Verify `token` against `signature`, optionally refusing when the
+    /// looked-up bundle's `expires_at` is in the past.
+    ///
+    /// When `enforce_expiry` is `false` this is identical to
+    /// [`Self::verify`] — pure ML-DSA (+ optional Ed25519) over the
+    /// canonical bytes. When `true`, an expired bundle short-circuits
+    /// with [`DirectoryVerifyError::BundleExpired`] *before* any signature
+    /// verification runs.
+    ///
+    /// Consumer guidance: authorization gates should pass
+    /// `enforce_expiry = true` so a rotated-out keypair can't authorise
+    /// new actions. Historical forensic verification (re-checking an
+    /// old audit trail against an archived bundle that has since
+    /// expired) should pass `false`.
+    pub async fn verify_with_expiry(
+        &self,
+        token: &PermitToken,
+        signature: &[u8],
+        enforce_expiry: bool,
     ) -> Result<(), DirectoryVerifyError> {
         let envelope: SignedTokenEnvelope = serde_json::from_slice(signature)
             .map_err(|e| DirectoryVerifyError::EnvelopeParse(e.to_string()))?;
@@ -356,6 +394,18 @@ impl DirectoryTokenVerifier {
         }
 
         let bundle = self.directory.fetch(&envelope.key_id).await?;
+
+        if enforce_expiry {
+            if let Some(expires_at) = bundle.expires_at {
+                if Utc::now() > expires_at {
+                    return Err(DirectoryVerifyError::BundleExpired {
+                        key_id: envelope.key_id.clone(),
+                        expired_at: expires_at,
+                    });
+                }
+            }
+        }
+
         let message = token.canonical_bytes();
 
         verify_ml_dsa_with_vk(

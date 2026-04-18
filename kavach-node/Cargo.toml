@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 kavach-core = { workspace = true }
 kavach-pq = { workspace = true }
-napi = { version = "2", features = ["async", "serde-json"] }
+napi = { version = "2", features = ["async", "napi4", "serde-json"] }
 napi-derive = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }

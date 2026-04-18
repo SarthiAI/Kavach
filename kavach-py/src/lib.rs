@@ -15,7 +15,18 @@
 
 use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 use kavach_core::{
-    self as core, audit::AuditEntry as CoreAuditEntry, Evaluator, TokenSigner as CoreTokenSigner,
+    self as core,
+    audit::AuditEntry as CoreAuditEntry,
+    invalidation::{
+        spawn_invalidation_listener as core_spawn_invalidation_listener,
+        InMemoryInvalidationBroadcaster as CoreInMemoryInvalidationBroadcaster,
+        InvalidationBroadcaster as CoreInvalidationBroadcaster,
+    },
+    rate_limit::RateLimitStore as CoreRateLimitStore,
+    session_store::{InMemorySessionStore as CoreInMemorySessionStore, SessionStore as CoreSessionStore},
+    Evaluator,
+    TokenSigner as CoreTokenSigner,
+    verdict::{InvalidationScope as CoreInvalidationScope, InvalidationTarget as CoreInvalidationTarget},
 };
 use kavach_pq::{
     audit::{self as pq_audit, SignedAuditChain as SignedAuditChainInner},
@@ -30,9 +41,15 @@ use kavach_pq::{
     KavachKeyPair as KavachKeyPairInner, PqTokenSigner as PqTokenSignerInner,
     PublicKeyBundle as PublicKeyBundleInner, SecureChannel as SecureChannelInner,
 };
+use kavach_redis::{
+    RedisInvalidationBroadcaster as CoreRedisInvalidationBroadcaster,
+    RedisRateLimitStore as CoreRedisRateLimitStore,
+    RedisSessionStore as CoreRedisSessionStore,
+};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use pyo3::wrap_pyfunction;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -681,6 +698,47 @@ impl GeoLocation {
     }
 }
 
+/// Device fingerprint — stable hash identifying a caller's device.
+///
+/// Exposed as a Python class so scenarios that exercise
+/// [`DeviceDrift`](kavach_core::drift::DeviceDrift) can pass a
+/// fingerprint into the `device=` / `origin_device=` kwargs on
+/// [`ActionContext`]. Only `hash` is required; `description` is
+/// free-text used in violation messages.
+#[pyclass]
+#[derive(Clone)]
+struct DeviceFingerprint {
+    inner: core::DeviceFingerprint,
+}
+
+#[pymethods]
+impl DeviceFingerprint {
+    #[new]
+    #[pyo3(signature = (hash, description=None))]
+    fn new(hash: String, description: Option<String>) -> Self {
+        Self {
+            inner: core::DeviceFingerprint { hash, description },
+        }
+    }
+
+    #[getter]
+    fn hash(&self) -> String {
+        self.inner.hash.clone()
+    }
+
+    #[getter]
+    fn description(&self) -> Option<String> {
+        self.inner.description.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        match &self.inner.description {
+            Some(d) => format!("DeviceFingerprint(hash={}, description={d})", self.inner.hash),
+            None => format!("DeviceFingerprint(hash={})", self.inner.hash),
+        }
+    }
+}
+
 /// Action context passed from Python to the Rust gate.
 #[pyclass]
 #[derive(Clone)]
@@ -703,6 +761,10 @@ impl ActionContext {
         current_geo=None,
         origin_geo=None,
         origin_ip=None,
+        device=None,
+        origin_device=None,
+        session_started_at=None,
+        action_count=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -717,6 +779,10 @@ impl ActionContext {
         current_geo: Option<GeoLocation>,
         origin_geo: Option<GeoLocation>,
         origin_ip: Option<String>,
+        device: Option<DeviceFingerprint>,
+        origin_device: Option<DeviceFingerprint>,
+        session_started_at: Option<i64>,
+        action_count: Option<u64>,
     ) -> PyResult<Self> {
         let kind = match principal_kind.as_str() {
             "user" => core::PrincipalKind::User,
@@ -774,6 +840,36 @@ impl ActionContext {
         }
         if let Some(g) = origin_geo {
             session.origin_geo = Some(g.inner);
+        }
+
+        // Device fingerprints — current on EnvContext, origin on SessionState.
+        // DeviceDrift fires when both are Some and they differ.
+        if let Some(d) = device {
+            env.device = Some(d.inner);
+        }
+        if let Some(d) = origin_device {
+            session.origin_device = Some(d.inner);
+        }
+
+        // SessionAgeDrift reads `session.started_at`. Accept unix-epoch seconds
+        // so scenarios can synthesise a session that looks "started 6 hours
+        // ago" without the PyO3 layer needing to speak chrono::DateTime.
+        if let Some(ts) = session_started_at {
+            match Utc.timestamp_opt(ts, 0).single() {
+                Some(dt) => session.started_at = dt,
+                None => {
+                    return Err(PyValueError::new_err(format!(
+                        "session_started_at: {ts} is not a valid unix timestamp"
+                    )))
+                }
+            }
+        }
+
+        // BehaviorDrift reads `session.action_count` vs. session age. Lets a
+        // scenario synthesise "100 actions in a 1-minute-old session" to
+        // trigger the rate-based violation detector.
+        if let Some(count) = action_count {
+            session.action_count = count;
         }
 
         Ok(Self {
@@ -835,6 +931,8 @@ impl Gate {
         enable_drift=true,
         token_signer=None,
         geo_drift_max_km=None,
+        rate_store=None,
+        broadcaster=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -845,11 +943,26 @@ impl Gate {
         enable_drift: bool,
         token_signer: Option<PqTokenSigner>,
         geo_drift_max_km: Option<f64>,
+        rate_store: Option<RedisRateLimitStore>,
+        broadcaster: Option<Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let policies = core::PolicySet::from_toml(policy_toml)
             .map_err(|e| PyValueError::new_err(format!("policy parse error: {e}")))?;
 
-        let policy_engine = Arc::new(core::PolicyEngine::new(policies));
+        // Distributed rate-limit store (Redis) when supplied; otherwise
+        // the core's in-memory default. The engine owns the Arc for the
+        // lifetime of the gate. Fail-closed on any store error is
+        // preserved end-to-end — see kavach-redis source for the
+        // record/count-in-window → Err path, and
+        // kavach-core::policy::Condition::RateLimit for the fail-closed
+        // branch that surfaces the error as a refuse.
+        let policy_engine = Arc::new(match rate_store {
+            Some(store) => {
+                let store_arc: Arc<dyn CoreRateLimitStore> = store.inner.clone();
+                core::PolicyEngine::with_rate_store(policies, store_arc)
+            }
+            None => core::PolicyEngine::new(policies),
+        });
 
         let mut evaluators: Vec<Arc<dyn Evaluator>> = vec![policy_engine.clone()];
 
@@ -896,6 +1009,22 @@ impl Gate {
             let signer_arc: Arc<dyn CoreTokenSigner> = signer.inner.clone();
             gate = gate.with_token_signer(signer_arc);
         }
+        if let Some(bc) = broadcaster {
+            // Accept either a Redis-backed broadcaster (distributed
+            // fan-out via Pub/Sub) or an in-process in-memory one
+            // (single-node, useful for scenarios and tests).
+            let bc_arc: Arc<dyn CoreInvalidationBroadcaster> =
+                if let Ok(b) = bc.extract::<RedisInvalidationBroadcaster>() {
+                    b.inner.clone()
+                } else if let Ok(b) = bc.extract::<InMemoryInvalidationBroadcaster>() {
+                    b.inner.clone()
+                } else {
+                    return Err(PyValueError::new_err(
+                        "broadcaster must be RedisInvalidationBroadcaster or InMemoryInvalidationBroadcaster",
+                    ));
+                };
+            gate = gate.with_broadcaster(bc_arc);
+        }
 
         Ok(Self {
             inner: Arc::new(gate),
@@ -918,12 +1047,23 @@ impl Gate {
 
     /// Evaluate an action context. Returns a Verdict.
     ///
-    /// This crosses into Rust for all evaluation logic:
-    /// policy matching, drift detection, invariant checks.
+    /// This crosses into Rust for all evaluation logic: policy matching,
+    /// drift detection, invariant checks. When the gate was configured
+    /// with `observe_only=True` the chain still runs in full and the
+    /// underlying refuse/invalidate verdicts still reach the audit sink,
+    /// but the caller-facing verdict is always Permit — operators get
+    /// full visibility of what the gate *would* do without production
+    /// traffic being refused.
     fn evaluate(&self, ctx: &ActionContext) -> Verdict {
         let gate = self.inner.clone();
         let inner_ctx = ctx.inner.clone();
-        let result = runtime().block_on(async move { gate.evaluate(&inner_ctx).await });
+        let result = runtime().block_on(async move {
+            if gate.is_observe_only() {
+                gate.evaluate_observe_only(&inner_ctx).await
+            } else {
+                gate.evaluate(&inner_ctx).await
+            }
+        });
         result.into()
     }
 
@@ -1509,14 +1649,501 @@ impl DirectoryTokenVerifier {
         }
     }
 
-    fn verify(&self, token: &PermitToken, signature: &[u8]) -> PyResult<()> {
+    /// Verify `signature` against `token` by resolving the envelope's
+    /// `key_id` through the wrapped directory.
+    ///
+    /// Raises `ValueError` on any failure (envelope parse, algorithm
+    /// mismatch, directory miss, signature invalid, expired bundle).
+    ///
+    /// `enforce_expiry` (default `True`): reject the verification if the
+    /// resolved bundle's `expires_at` is in the past. This is the
+    /// correct-by-default posture for an authorization gate — a rotated-
+    /// out keypair MUST NOT authorise new actions even if its signature
+    /// is still cryptographically valid. Pass `enforce_expiry=False` for
+    /// historical forensic verification (re-checking an archived audit
+    /// trail against a bundle that has since expired).
+    #[pyo3(signature = (token, signature, *, enforce_expiry=true))]
+    fn verify(
+        &self,
+        token: &PermitToken,
+        signature: &[u8],
+        enforce_expiry: bool,
+    ) -> PyResult<()> {
         let verifier = self.inner.clone();
         let tok = token.inner.clone();
         let sig = signature.to_vec();
         runtime()
-            .block_on(async move { verifier.verify(&tok, &sig).await })
+            .block_on(async move {
+                verifier
+                    .verify_with_expiry(&tok, &sig, enforce_expiry)
+                    .await
+            })
             .map_err(|e| PyValueError::new_err(format!("verify failed: {e}")))
     }
+}
+
+// ─── Redis-backed pluggable stores ───────────────────────────────
+//
+// The core `RateLimitStore` / `SessionStore` / `InvalidationBroadcaster`
+// traits are object-safe but not directly Python-constructible (a
+// Python class can't implement an async Rust trait without a deep GIL
+// bridge — see HANDOFF.md § "post-release follow-ups" for the planned
+// generic Python-callable bridge). For now, we expose the concrete
+// Redis implementations from `kavach-redis` as PyO3 classes. These
+// cover the dominant distributed-deployment story (Redis-backed rate
+// limits, sessions, and Pub/Sub invalidation) without the complexity
+// of an async-over-GIL callback layer.
+//
+// All three classes take a Redis URL at construction; every method
+// that touches Redis is still invoked inside Rust, so Python never
+// holds the GIL while waiting on network I/O.
+
+/// Redis-backed distributed rate-limit store.
+///
+/// Use this to replace Kavach's default in-memory rate-limit counter
+/// with one that stays consistent across service replicas.  All
+/// rate-limit state lives under Redis keys prefixed `kavach:rl:*`
+/// with a 24-hour retention window (matching the in-memory default).
+///
+/// Pass the constructed instance as the ``rate_store`` keyword to
+/// :class:`Gate`.  Fail-closed semantics are preserved — any Redis
+/// error on `record` causes the enclosing evaluation to Refuse.
+#[pyclass]
+#[derive(Clone)]
+struct RedisRateLimitStore {
+    inner: Arc<CoreRedisRateLimitStore>,
+}
+
+#[pymethods]
+impl RedisRateLimitStore {
+    /// Construct from a Redis connection URL.
+    ///
+    /// The initial connection is established synchronously (via an
+    /// internal tokio runtime); transient failures after construction
+    /// auto-reconnect inside `redis-rs`'s `ConnectionManager`.
+    ///
+    /// Args:
+    ///     url: ``redis://host:port/db`` or ``rediss://`` for TLS.
+    ///
+    /// Raises:
+    ///     ValueError: malformed URL or initial connection failure.
+    #[classmethod]
+    fn from_url(_cls: &Bound<'_, pyo3::types::PyType>, url: String) -> PyResult<Self> {
+        let inner = runtime()
+            .block_on(async move { CoreRedisRateLimitStore::from_url(&url).await })
+            .map_err(|e| PyValueError::new_err(format!("RedisRateLimitStore::from_url: {e}")))?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+}
+
+/// Redis-backed distributed session store.
+///
+/// Used by :class:`McpKavachMiddleware` (future integration — not yet
+/// wired through the Python MCP middleware; construct and hold for
+/// forward-compat) and by any integrator who manages ``SessionState``
+/// directly. Sessions are serialized as JSON under ``kavach:session:*``
+/// keys with a configurable TTL. Redis handles expiration natively;
+/// no cleanup loop required.
+///
+/// Fail-closed semantics are preserved — any Redis error on `get` /
+/// `put` causes the upstream evaluator to refuse.
+#[pyclass]
+#[derive(Clone)]
+struct RedisSessionStore {
+    inner: Arc<CoreRedisSessionStore>,
+}
+
+#[pymethods]
+impl RedisSessionStore {
+    /// Construct from a Redis URL with default 24-hour TTL per session.
+    #[classmethod]
+    fn from_url(_cls: &Bound<'_, pyo3::types::PyType>, url: String) -> PyResult<Self> {
+        let inner = runtime()
+            .block_on(async move { CoreRedisSessionStore::from_url(&url).await })
+            .map_err(|e| PyValueError::new_err(format!("RedisSessionStore::from_url: {e}")))?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Construct from a Redis URL with a custom per-session TTL (seconds).
+    ///
+    /// A TTL of 0 is rejected — Redis treats it as expire-immediately,
+    /// which would render the store useless.
+    #[classmethod]
+    fn from_url_with_ttl(
+        _cls: &Bound<'_, pyo3::types::PyType>,
+        url: String,
+        ttl_secs: u64,
+    ) -> PyResult<Self> {
+        let inner = runtime()
+            .block_on(async move { CoreRedisSessionStore::from_url_with_ttl(&url, ttl_secs).await })
+            .map_err(|e| {
+                PyValueError::new_err(format!("RedisSessionStore::from_url_with_ttl: {e}"))
+            })?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// True if the session is both stored AND flagged invalidated.
+    ///
+    /// A session that has never been put into the store returns ``False``
+    /// (absent ≠ invalidated). Used by :class:`McpKavachMiddleware` to
+    /// honour cross-node invalidation before each gated call.
+    fn is_invalidated(&self, session_id: String) -> PyResult<bool> {
+        let store = self.inner.clone();
+        runtime()
+            .block_on(async move { store.get(&session_id).await })
+            .map(|opt| opt.map(|s| s.invalidated).unwrap_or(false))
+            .map_err(|e| PyRuntimeError::new_err(format!("RedisSessionStore::is_invalidated: {e}")))
+    }
+
+    /// Mark a session invalidated, persisting across replicas.
+    ///
+    /// If the session does not yet exist in the store, a fresh
+    /// :class:`kavach_core::SessionState` is created with
+    /// ``invalidated=true`` (acts as a poison pill — any peer node that
+    /// later checks this session id sees it invalidated).
+    fn invalidate(&self, session_id: String) -> PyResult<()> {
+        let store = self.inner.clone();
+        runtime()
+            .block_on(async move {
+                let mut state = store
+                    .get(&session_id)
+                    .await?
+                    .unwrap_or_else(|| {
+                        let mut s = core::SessionState::new();
+                        if let Ok(uuid) = uuid::Uuid::parse_str(&session_id) {
+                            s.session_id = uuid;
+                        }
+                        s
+                    });
+                state.invalidated = true;
+                store.put(&session_id, state).await
+            })
+            .map_err(|e| PyRuntimeError::new_err(format!("RedisSessionStore::invalidate: {e}")))
+    }
+}
+
+/// In-process session store — default backend for :class:`McpKavachMiddleware`
+/// when no Redis store is supplied.
+///
+/// Not distributed; sessions are lost on process restart. Useful when a
+/// single-replica deploy still wants the middleware to go through the
+/// SessionStore API instead of a local Python dict — keeps the code path
+/// identical between single-node and multi-node deployments.
+#[pyclass]
+#[derive(Clone)]
+struct InMemorySessionStore {
+    inner: Arc<CoreInMemorySessionStore>,
+}
+
+#[pymethods]
+impl InMemorySessionStore {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(CoreInMemorySessionStore::new()),
+        }
+    }
+
+    /// Same semantics as :meth:`RedisSessionStore.is_invalidated`.
+    fn is_invalidated(&self, session_id: String) -> PyResult<bool> {
+        let store = self.inner.clone();
+        runtime()
+            .block_on(async move { store.get(&session_id).await })
+            .map(|opt| opt.map(|s| s.invalidated).unwrap_or(false))
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("InMemorySessionStore::is_invalidated: {e}"))
+            })
+    }
+
+    /// Same semantics as :meth:`RedisSessionStore.invalidate`.
+    fn invalidate(&self, session_id: String) -> PyResult<()> {
+        let store = self.inner.clone();
+        runtime()
+            .block_on(async move {
+                let mut state = store
+                    .get(&session_id)
+                    .await?
+                    .unwrap_or_else(|| {
+                        let mut s = core::SessionState::new();
+                        if let Ok(uuid) = uuid::Uuid::parse_str(&session_id) {
+                            s.session_id = uuid;
+                        }
+                        s
+                    });
+                state.invalidated = true;
+                store.put(&session_id, state).await
+            })
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("InMemorySessionStore::invalidate: {e}"))
+            })
+    }
+
+    /// Number of sessions currently tracked (observability / tests).
+    #[getter]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+/// Redis Pub/Sub-backed distributed invalidation broadcaster.
+///
+/// Pass the constructed instance as the ``broadcaster`` keyword to
+/// :class:`Gate` so an `Invalidate` verdict on any node fan-outs to
+/// every other node subscribed to the same Redis channel.
+///
+/// Fail-closed semantics: `publish` errors never downgrade a local
+/// verdict — an `Invalidate` stands even if peers can't be told.
+/// Matches the `InvalidationBroadcaster` trait contract.
+#[pyclass]
+#[derive(Clone)]
+struct RedisInvalidationBroadcaster {
+    inner: Arc<CoreRedisInvalidationBroadcaster>,
+}
+
+#[pymethods]
+impl RedisInvalidationBroadcaster {
+    /// Construct from a Redis URL and a Pub/Sub channel name.
+    ///
+    /// Spawns a background task that bridges Redis Pub/Sub messages
+    /// into a local `tokio::broadcast` channel. The task is aborted
+    /// when the last clone of this broadcaster is dropped.
+    #[classmethod]
+    fn from_url(
+        _cls: &Bound<'_, pyo3::types::PyType>,
+        url: String,
+        channel: String,
+    ) -> PyResult<Self> {
+        let inner = runtime()
+            .block_on(async move { CoreRedisInvalidationBroadcaster::from_url(&url, channel).await })
+            .map_err(|e| {
+                PyValueError::new_err(format!("RedisInvalidationBroadcaster::from_url: {e}"))
+            })?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+}
+
+// ─── Invalidation: scope + listener + in-memory broadcaster ──────
+
+/// Python-facing view of a [`kavach_core::verdict::InvalidationScope`].
+///
+/// Passed to the callback registered via
+/// :func:`spawn_invalidation_listener`. Exposes the fan-out target
+/// (session / principal / role) and the human-readable reason that
+/// an evaluator produced.
+#[pyclass]
+#[derive(Clone)]
+struct InvalidationScope {
+    inner: CoreInvalidationScope,
+}
+
+#[pymethods]
+impl InvalidationScope {
+    /// ``"session"`` | ``"principal"`` | ``"role"``.
+    #[getter]
+    fn target_kind(&self) -> &'static str {
+        match &self.inner.target {
+            CoreInvalidationTarget::Session(_) => "session",
+            CoreInvalidationTarget::Principal(_) => "principal",
+            CoreInvalidationTarget::Role(_) => "role",
+        }
+    }
+
+    /// The identifier for the target — UUID string (session), principal id, or role name.
+    #[getter]
+    fn target_id(&self) -> String {
+        match &self.inner.target {
+            CoreInvalidationTarget::Session(uuid) => uuid.to_string(),
+            CoreInvalidationTarget::Principal(id) => id.clone(),
+            CoreInvalidationTarget::Role(role) => role.clone(),
+        }
+    }
+
+    #[getter]
+    fn reason(&self) -> String {
+        self.inner.reason.clone()
+    }
+
+    #[getter]
+    fn evaluator(&self) -> String {
+        self.inner.evaluator.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "InvalidationScope(target_kind={}, target_id={}, evaluator={})",
+            self.target_kind(),
+            self.target_id(),
+            self.inner.evaluator,
+        )
+    }
+}
+
+/// Process-local invalidation broadcaster — default backend when no
+/// Redis broadcaster is configured.
+///
+/// Subscribers created via :func:`spawn_invalidation_listener` receive
+/// every ``publish`` that arrives *after* the subscription. Useful for
+/// single-node deployments that still want a uniform code path with
+/// the distributed :class:`RedisInvalidationBroadcaster`, and for
+/// scenarios that exercise the broadcaster contract without standing
+/// up Redis.
+#[pyclass]
+#[derive(Clone)]
+struct InMemoryInvalidationBroadcaster {
+    inner: Arc<CoreInMemoryInvalidationBroadcaster>,
+}
+
+#[pymethods]
+impl InMemoryInvalidationBroadcaster {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(CoreInMemoryInvalidationBroadcaster::new()),
+        }
+    }
+
+    /// Manually publish an invalidation. Real callers get this for free
+    /// through ``Gate.evaluate()`` when an evaluator returns
+    /// ``Invalidate``; this method is here for tests / scenarios that
+    /// want to exercise the subscribe path without having to route a
+    /// synthetic Invalidate through the gate.
+    #[pyo3(signature = (target_kind, target_id, reason, evaluator="manual".to_string()))]
+    fn publish(
+        &self,
+        target_kind: String,
+        target_id: String,
+        reason: String,
+        evaluator: String,
+    ) -> PyResult<()> {
+        let target = match target_kind.as_str() {
+            "session" => CoreInvalidationTarget::Session(
+                uuid::Uuid::parse_str(&target_id)
+                    .map_err(|e| PyValueError::new_err(format!("target_id not a UUID: {e}")))?,
+            ),
+            "principal" => CoreInvalidationTarget::Principal(target_id),
+            "role" => CoreInvalidationTarget::Role(target_id),
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "target_kind must be 'session'|'principal'|'role', got '{other}'"
+                )))
+            }
+        };
+        let scope = CoreInvalidationScope {
+            target,
+            reason,
+            evaluator,
+        };
+        let b = self.inner.clone();
+        runtime()
+            .block_on(async move { b.publish(scope).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("publish: {e}")))
+    }
+
+    /// Live subscriber count (observability / tests).
+    #[getter]
+    fn subscriber_count(&self) -> usize {
+        self.inner.subscriber_count()
+    }
+}
+
+/// Opaque handle for a running listener task spawned by
+/// :func:`spawn_invalidation_listener`.
+///
+/// Integrator owns the lifecycle. The task exits on its own when the
+/// broadcaster's channel closes; call :meth:`abort` to stop it sooner.
+#[pyclass]
+struct InvalidationListenerHandle {
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+#[pymethods]
+impl InvalidationListenerHandle {
+    /// Stop the listener. Idempotent — calling twice is a no-op.
+    fn abort(&mut self) {
+        if let Some(h) = self.handle.take() {
+            h.abort();
+        }
+    }
+
+    /// True if the listener task has finished.
+    #[getter]
+    fn is_finished(&self) -> bool {
+        self.handle.as_ref().map(|h| h.is_finished()).unwrap_or(true)
+    }
+}
+
+/// Spawn a listener that calls ``callback(scope)`` for every
+/// invalidation published on ``broadcaster``.
+///
+/// ``broadcaster`` accepts either an :class:`InMemoryInvalidationBroadcaster`
+/// or a :class:`RedisInvalidationBroadcaster`. ``callback`` is any
+/// Python callable taking a single :class:`InvalidationScope`
+/// argument; exceptions raised inside the callback are caught and
+/// logged (they do not kill the listener).
+///
+/// Returns an :class:`InvalidationListenerHandle` whose
+/// :meth:`~InvalidationListenerHandle.abort` stops the task.
+///
+/// Example::
+///
+///     from kavach import InMemoryInvalidationBroadcaster, spawn_invalidation_listener
+///
+///     broadcaster = InMemoryInvalidationBroadcaster()
+///     received = []
+///     handle = spawn_invalidation_listener(broadcaster, received.append)
+#[pyfunction]
+fn spawn_invalidation_listener(
+    broadcaster: &Bound<'_, PyAny>,
+    callback: Py<PyAny>,
+) -> PyResult<InvalidationListenerHandle> {
+    // Accept either broadcaster pyclass and resolve to the common trait object.
+    let bc_arc: Arc<dyn CoreInvalidationBroadcaster> =
+        if let Ok(b) = broadcaster.extract::<InMemoryInvalidationBroadcaster>() {
+            b.inner.clone()
+        } else if let Ok(b) = broadcaster.extract::<RedisInvalidationBroadcaster>() {
+            b.inner.clone()
+        } else {
+            return Err(PyValueError::new_err(
+                "broadcaster must be InMemoryInvalidationBroadcaster or RedisInvalidationBroadcaster",
+            ));
+        };
+
+    let cb = Arc::new(callback);
+    let handle = {
+        let _guard = runtime().enter();
+        core_spawn_invalidation_listener(bc_arc, move |scope| {
+            let cb = cb.clone();
+            async move {
+                Python::with_gil(|py| {
+                    let py_scope = InvalidationScope { inner: scope };
+                    match cb.call1(py, (py_scope,)) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            // Print to stderr instead of `tracing` — kavach-py
+                            // does not depend on the tracing crate. The listener
+                            // keeps running despite the exception (matches the
+                            // contract in core::spawn_invalidation_listener).
+                            eprintln!(
+                                "[kavach] invalidation listener callback raised — continuing: {err}"
+                            );
+                        }
+                    }
+                });
+            }
+        })
+    };
+
+    Ok(InvalidationListenerHandle {
+        handle: Some(handle),
+    })
 }
 
 // ─── Python module definition ────────────────────────────────────
@@ -1530,6 +2157,7 @@ fn _kavach_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Gate>()?;
     m.add_class::<ActionContext>()?;
     m.add_class::<GeoLocation>()?;
+    m.add_class::<DeviceFingerprint>()?;
     m.add_class::<Verdict>()?;
     m.add_class::<PermitToken>()?;
     m.add_class::<PqTokenSigner>()?;
@@ -1540,5 +2168,13 @@ fn _kavach_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SecureChannel>()?;
     m.add_class::<PublicKeyDirectory>()?;
     m.add_class::<DirectoryTokenVerifier>()?;
+    m.add_class::<RedisRateLimitStore>()?;
+    m.add_class::<RedisSessionStore>()?;
+    m.add_class::<InMemorySessionStore>()?;
+    m.add_class::<RedisInvalidationBroadcaster>()?;
+    m.add_class::<InMemoryInvalidationBroadcaster>()?;
+    m.add_class::<InvalidationScope>()?;
+    m.add_class::<InvalidationListenerHandle>()?;
+    m.add_function(wrap_pyfunction!(spawn_invalidation_listener, m)?)?;
     Ok(())
 }

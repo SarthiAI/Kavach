@@ -95,9 +95,16 @@ impl RedisInvalidationBroadcaster {
     ) -> Result<Self, RedisBroadcasterError> {
         let channel = channel.into();
 
-        let conn = ConnectionManager::new(client.clone())
-            .await
-            .map_err(|e| RedisBroadcasterError::Connection(e.to_string()))?;
+        let conn =
+            tokio::time::timeout(crate::CONNECT_TIMEOUT, ConnectionManager::new(client.clone()))
+                .await
+                .map_err(|_| {
+                    RedisBroadcasterError::Connection(format!(
+                        "redis connect timed out after {:?}",
+                        crate::CONNECT_TIMEOUT
+                    ))
+                })?
+                .map_err(|e| RedisBroadcasterError::Connection(e.to_string()))?;
 
         let (local_sender, _) = broadcast::channel::<InvalidationScope>(capacity);
 

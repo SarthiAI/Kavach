@@ -7,7 +7,12 @@
 
 use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 use kavach_core::{
-    self as core, audit::AuditEntry as CoreAuditEntry, Evaluator, TokenSigner as CoreTokenSigner,
+    self as core, audit::AuditEntry as CoreAuditEntry,
+    spawn_invalidation_listener as core_spawn_invalidation_listener, Evaluator,
+    InMemoryInvalidationBroadcaster as CoreInMemoryInvalidationBroadcaster,
+    InvalidationBroadcaster as CoreInvalidationBroadcaster,
+    InvalidationScope as CoreInvalidationScope, InvalidationTarget as CoreInvalidationTarget,
+    TokenSigner as CoreTokenSigner,
 };
 use kavach_pq::{
     audit::{self as pq_audit, SignedAuditChain as SignedAuditChainInner},
@@ -23,9 +28,13 @@ use kavach_pq::{
     PublicKeyBundle as PublicKeyBundleInner, SecureChannel as SecureChannelInner,
 };
 use napi::bindgen_prelude::*;
+use napi::threadsafe_function::{
+    ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode,
+};
+use napi::JsFunction;
 use napi_derive::napi;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
@@ -149,6 +158,24 @@ pub struct ActionContextInput {
     /// (→ `SessionState.origin_geo`). Needed alongside `currentGeo` for
     /// tolerant-mode `GeoLocationDrift`.
     pub origin_geo: Option<GeoLocationInput>,
+    /// Explicit session-origin IP. When set, overrides the `ip`-derived
+    /// default (`session.origin_ip = env.ip`) — lets callers model
+    /// "session started from X, request from Y" for strict/tolerant
+    /// `GeoLocationDrift`.
+    pub origin_ip: Option<String>,
+    /// Current device fingerprint (→ `EnvContext.device`). Combined
+    /// with `originDevice`, feeds `DeviceDrift`.
+    pub device: Option<DeviceFingerprintInput>,
+    /// Session-origin device fingerprint (→ `SessionState.origin_device`).
+    /// `DeviceDrift` fires when both sides are set and the hashes differ.
+    pub origin_device: Option<DeviceFingerprintInput>,
+    /// Unix-epoch seconds; synthesizes `SessionState.started_at`. Lets
+    /// scenarios exercise `SessionAgeDrift` without waiting hours.
+    pub session_started_at: Option<i64>,
+    /// Synthesized `SessionState.action_count`. Combined with a
+    /// synthesized `session_started_at`, feeds `BehaviorDrift`'s
+    /// actions-per-minute calculation.
+    pub action_count: Option<u32>,
 }
 
 /// Plain-object view of `kavach_core::GeoLocation`. `countryCode` is
@@ -170,6 +197,21 @@ fn geo_input_to_core(g: GeoLocationInput) -> core::GeoLocation {
         city: g.city,
         latitude: g.latitude,
         longitude: g.longitude,
+    }
+}
+
+/// Plain-object view of `kavach_core::DeviceFingerprint`. `hash` is
+/// required; `description` is free-text for drift violation messages.
+#[napi(object)]
+pub struct DeviceFingerprintInput {
+    pub hash: String,
+    pub description: Option<String>,
+}
+
+fn device_input_to_core(d: DeviceFingerprintInput) -> core::DeviceFingerprint {
+    core::DeviceFingerprint {
+        hash: d.hash,
+        description: d.description,
     }
 }
 
@@ -767,6 +809,7 @@ impl KavachGate {
         enable_drift: Option<bool>,
         token_signer: Option<&PqTokenSigner>,
         geo_drift_max_km: Option<f64>,
+        broadcaster: Option<&InMemoryInvalidationBroadcaster>,
     ) -> Result<Self> {
         let policies = core::PolicySet::from_toml(&policy_toml)
             .map_err(|e| Error::from_reason(format!("policy parse error: {e}")))?;
@@ -816,6 +859,10 @@ impl KavachGate {
             let signer_arc: Arc<dyn CoreTokenSigner> = signer.inner.clone();
             gate = gate.with_token_signer(signer_arc);
         }
+        if let Some(bc) = broadcaster {
+            let bc_arc: Arc<dyn CoreInvalidationBroadcaster> = bc.inner.clone();
+            gate = gate.with_broadcaster(bc_arc);
+        }
 
         Ok(Self {
             inner: Arc::new(gate),
@@ -839,6 +886,12 @@ impl KavachGate {
     /// Evaluate an action context. Returns a VerdictResult.
     ///
     /// Crosses into Rust for all evaluation: policy, drift, invariants.
+    /// When the gate was configured with `observeOnly: true`, the full
+    /// evaluator chain still runs and real Refuse/Invalidate verdicts
+    /// still reach the audit sink and the broadcaster — but the
+    /// caller-facing verdict is always Permit. Operators get full
+    /// visibility of what the gate *would* do without production
+    /// traffic being refused during a rollout.
     #[napi]
     pub fn evaluate(&self, ctx: ActionContextInput) -> Result<VerdictResult> {
         let kind = match ctx.principal_kind.as_str() {
@@ -882,6 +935,9 @@ impl KavachGate {
             env.ip = ip_str.parse().ok();
             session.origin_ip = env.ip;
         }
+        if let Some(origin_str) = ctx.origin_ip {
+            session.origin_ip = origin_str.parse().ok();
+        }
 
         if let Some(g) = ctx.current_geo {
             env.geo = Some(geo_input_to_core(g));
@@ -890,10 +946,38 @@ impl KavachGate {
             session.origin_geo = Some(geo_input_to_core(g));
         }
 
+        if let Some(d) = ctx.device {
+            env.device = Some(device_input_to_core(d));
+        }
+        if let Some(d) = ctx.origin_device {
+            session.origin_device = Some(device_input_to_core(d));
+        }
+
+        if let Some(ts) = ctx.session_started_at {
+            use chrono::TimeZone;
+            match chrono::Utc.timestamp_opt(ts, 0).single() {
+                Some(dt) => session.started_at = dt,
+                None => {
+                    return Err(Error::from_reason(format!(
+                        "sessionStartedAt: {ts} is not a valid unix timestamp"
+                    )))
+                }
+            }
+        }
+        if let Some(count) = ctx.action_count {
+            session.action_count = count as u64;
+        }
+
         let inner_ctx = core::ActionContext::new(principal, action, session, env);
 
         let gate = self.inner.clone();
-        let result = runtime().block_on(async move { gate.evaluate(&inner_ctx).await });
+        let result = runtime().block_on(async move {
+            if gate.is_observe_only() {
+                gate.evaluate_observe_only(&inner_ctx).await
+            } else {
+                gate.evaluate(&inner_ctx).await
+            }
+        });
 
         Ok(result.into())
     }
@@ -1201,14 +1285,208 @@ impl DirectoryTokenVerifier {
 
     /// Verify `signature` against the supplied PermitToken fields.
     /// Throws on any failure (envelope parse, algorithm mismatch,
-    /// directory miss, signature invalid).
+    /// directory miss, signature invalid, expired bundle).
+    ///
+    /// `enforceExpiry` (default `true`): reject verification if the
+    /// resolved bundle's `expires_at` is in the past. This is the
+    /// correct-by-default posture for an authorization gate — a
+    /// rotated-out keypair MUST NOT authorise new actions even if
+    /// its signature is still cryptographically valid. Pass
+    /// `enforceExpiry: false` for historical forensic verification
+    /// (re-checking an archived audit trail against a bundle that
+    /// has since expired).
     #[napi]
-    pub fn verify(&self, token: PermitTokenInput, signature: Buffer) -> Result<()> {
+    pub fn verify(
+        &self,
+        token: PermitTokenInput,
+        signature: Buffer,
+        enforce_expiry: Option<bool>,
+    ) -> Result<()> {
         let pt = permit_token_from_input(&token)?;
         let verifier = self.inner.clone();
         let sig = signature.to_vec();
+        let enforce = enforce_expiry.unwrap_or(true);
         runtime()
-            .block_on(async move { verifier.verify(&pt, &sig).await })
+            .block_on(async move { verifier.verify_with_expiry(&pt, &sig, enforce).await })
             .map_err(|e| Error::from_reason(format!("verify failed: {e}")))
     }
+}
+
+// ─── Invalidation broadcaster + listener ─────────────────────────
+//
+// Pluggable broadcaster so multi-replica deployments can fan out
+// Invalidate verdicts across nodes. The in-memory implementation is
+// the default single-node backend and is also what single-process
+// smoke tests exercise.
+
+/// JS-visible view of a [`core::InvalidationScope`]. Passed as the
+/// sole argument to the callback registered via
+/// `spawnInvalidationListener`. `targetKind` is `"session"`,
+/// `"principal"`, or `"role"`; `targetId` is the matching id (UUID
+/// string for session, principal id for principal, role name for role).
+#[napi(object)]
+#[derive(Clone)]
+pub struct InvalidationScopeView {
+    pub target_kind: String,
+    pub target_id: String,
+    pub reason: String,
+    pub evaluator: String,
+}
+
+impl From<CoreInvalidationScope> for InvalidationScopeView {
+    fn from(s: CoreInvalidationScope) -> Self {
+        let (target_kind, target_id) = match s.target {
+            CoreInvalidationTarget::Session(uuid) => ("session".to_string(), uuid.to_string()),
+            CoreInvalidationTarget::Principal(id) => ("principal".to_string(), id),
+            CoreInvalidationTarget::Role(role) => ("role".to_string(), role),
+        };
+        Self {
+            target_kind,
+            target_id,
+            reason: s.reason,
+            evaluator: s.evaluator,
+        }
+    }
+}
+
+/// Process-local invalidation broadcaster — default backend when no
+/// Redis broadcaster is configured.
+///
+/// Subscribers created via `spawnInvalidationListener` receive every
+/// `publish` that arrives *after* the subscription. Useful for
+/// single-node deployments that still want a uniform code path with
+/// the distributed broadcaster, and for smoke tests that exercise
+/// the broadcaster contract without standing up Redis.
+#[napi]
+pub struct InMemoryInvalidationBroadcaster {
+    inner: Arc<CoreInMemoryInvalidationBroadcaster>,
+}
+
+#[napi]
+impl InMemoryInvalidationBroadcaster {
+    #[napi(constructor)]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(CoreInMemoryInvalidationBroadcaster::new()),
+        }
+    }
+
+    /// Manually publish an invalidation. Real callers get this for
+    /// free through `Gate.evaluate()` when an evaluator returns
+    /// `Invalidate`; this method is here for tests / scenarios that
+    /// want to exercise the subscribe path without routing a
+    /// synthetic Invalidate through the gate.
+    ///
+    /// `targetKind` must be `"session"`, `"principal"`, or `"role"`.
+    /// For `"session"`, `targetId` MUST be a valid UUID string.
+    #[napi]
+    pub fn publish(
+        &self,
+        target_kind: String,
+        target_id: String,
+        reason: String,
+        evaluator: Option<String>,
+    ) -> Result<()> {
+        let target = match target_kind.as_str() {
+            "session" => CoreInvalidationTarget::Session(
+                uuid::Uuid::parse_str(&target_id)
+                    .map_err(|e| Error::from_reason(format!("targetId not a UUID: {e}")))?,
+            ),
+            "principal" => CoreInvalidationTarget::Principal(target_id),
+            "role" => CoreInvalidationTarget::Role(target_id),
+            other => {
+                return Err(Error::from_reason(format!(
+                    "targetKind must be 'session'|'principal'|'role', got '{other}'"
+                )))
+            }
+        };
+        let scope = CoreInvalidationScope {
+            target,
+            reason,
+            evaluator: evaluator.unwrap_or_else(|| "manual".to_string()),
+        };
+        let b = self.inner.clone();
+        runtime()
+            .block_on(async move { b.publish(scope).await })
+            .map_err(|e| Error::from_reason(format!("publish: {e}")))
+    }
+
+    /// Live subscriber count (observability / tests).
+    #[napi(getter)]
+    pub fn subscriber_count(&self) -> u32 {
+        self.inner.subscriber_count() as u32
+    }
+}
+
+/// Opaque handle for a running listener task spawned by
+/// `spawnInvalidationListener`. Integrator owns the lifecycle —
+/// the task exits on its own when the broadcaster's channel closes;
+/// call `abort()` to stop it sooner.
+#[napi]
+pub struct InvalidationListenerHandle {
+    handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+#[napi]
+impl InvalidationListenerHandle {
+    /// Stop the listener. Idempotent — calling twice is a no-op.
+    #[napi]
+    pub fn abort(&self) {
+        if let Ok(mut guard) = self.handle.lock() {
+            if let Some(h) = guard.take() {
+                h.abort();
+            }
+        }
+    }
+
+    /// True if the listener task has finished.
+    #[napi(getter)]
+    pub fn is_finished(&self) -> bool {
+        self.handle
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|h| h.is_finished()))
+            .unwrap_or(true)
+    }
+}
+
+/// Spawn a listener that calls `callback(scope)` for every
+/// invalidation published on `broadcaster`.
+///
+/// `callback` is any JS function taking a single
+/// `InvalidationScopeView` argument. The callback runs on the Node
+/// event loop (ThreadsafeFunction); exceptions thrown inside the
+/// callback do NOT stop the listener — they surface through the
+/// napi error strategy.
+///
+/// Returns an `InvalidationListenerHandle`; call `.abort()` to stop
+/// the task before the broadcaster's channel closes.
+#[napi]
+pub fn spawn_invalidation_listener(
+    broadcaster: &InMemoryInvalidationBroadcaster,
+    callback: JsFunction,
+) -> Result<InvalidationListenerHandle> {
+    let tsfn: ThreadsafeFunction<InvalidationScopeView, ErrorStrategy::CalleeHandled> = callback
+        .create_threadsafe_function(0, |ctx| Ok(vec![ctx.value]))?;
+
+    let bc_arc: Arc<dyn CoreInvalidationBroadcaster> = broadcaster.inner.clone();
+
+    let handle = {
+        let _guard = runtime().enter();
+        core_spawn_invalidation_listener(bc_arc, move |scope| {
+            let tsfn = tsfn.clone();
+            async move {
+                let view = InvalidationScopeView::from(scope);
+                // NonBlocking — don't let a slow JS callback back-pressure
+                // the broadcaster. Matches the Python binding's "fire and
+                // log on error" contract.
+                tsfn.call(Ok(view), ThreadsafeFunctionCallMode::NonBlocking);
+            }
+        })
+    };
+
+    Ok(InvalidationListenerHandle {
+        handle: Mutex::new(Some(handle)),
+    })
 }

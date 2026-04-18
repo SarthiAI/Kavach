@@ -26,15 +26,19 @@
 import {
   AuditEntry,
   DirectoryTokenVerifier,
+  InMemoryInvalidationBroadcaster,
+  InvalidationListenerHandle,
   KavachGate,
   KavachKeyPair,
   PqTokenSigner,
   PublicKeyDirectory,
   SecureChannel,
   SignedAuditChain,
+  spawnInvalidationListener as spawnInvalidationListenerRaw,
   type ActionContextInput,
   type AuditEntryOptions,
   type GeoLocationInput,
+  type InvalidationScopeView,
   type PermitTokenInput,
   type PermitTokenView,
   type PublicKeyBundleView,
@@ -95,6 +99,14 @@ export interface GateOptions {
    * set fails closed (Violation).
    */
   geoDriftMaxKm?: number;
+  /**
+   * Optional invalidation broadcaster. When set, every `Invalidate`
+   * verdict is also published on the broadcaster so subscribers on
+   * other replicas can revoke the same session / principal / role.
+   * Broadcast failure does NOT downgrade the local verdict
+   * (fail-closed locally, best-effort globally).
+   */
+  broadcaster?: InMemoryInvalidationBroadcaster;
 }
 
 export { VerdictResult as Verdict };
@@ -106,14 +118,51 @@ export {
   SecureChannel,
   PublicKeyDirectory,
   DirectoryTokenVerifier,
+  InMemoryInvalidationBroadcaster,
+  InvalidationListenerHandle,
 };
 export type {
   AuditEntryOptions,
   GeoLocationInput,
+  InvalidationScopeView,
   PermitTokenInput,
   PermitTokenView,
   PublicKeyBundleView,
 };
+
+/**
+ * Spawn a listener that invokes `callback(scope)` for every
+ * invalidation published on `broadcaster`.
+ *
+ * Returns an {@link InvalidationListenerHandle} whose `abort()`
+ * stops the task. Matches the Python
+ * `kavach.spawn_invalidation_listener(...)` surface. Exceptions
+ * thrown inside the callback do NOT stop the listener.
+ */
+export function spawnInvalidationListener(
+  broadcaster: InMemoryInvalidationBroadcaster,
+  callback: (scope: InvalidationScopeView) => void,
+): InvalidationListenerHandle {
+  // The native threadsafe-function bridge delivers
+  // (err: Error | null, value: InvalidationScopeView) per the
+  // CalleeHandled error strategy. We hide that from SDK callers and
+  // present the single-arg callback that Python does.
+  return spawnInvalidationListenerRaw(broadcaster, (err: unknown, scope: InvalidationScopeView) => {
+    if (err != null) {
+      // Defensive: napi's CalleeHandled strategy surfaces errors in
+      // the first arg. Log and swallow so the listener keeps running.
+      // eslint-disable-next-line no-console
+      console.error('[kavach] invalidation listener raised — continuing:', err);
+      return;
+    }
+    try {
+      callback(scope);
+    } catch (cbErr) {
+      // eslint-disable-next-line no-console
+      console.error('[kavach] invalidation callback threw — continuing:', cbErr);
+    }
+  });
+}
 
 // ─── Gate ────────────────────────────────────────────────────────
 
@@ -143,6 +192,7 @@ export class Gate {
       options.enableDrift,
       options.tokenSigner,
       options.geoDriftMaxKm,
+      options.broadcaster,
     );
     return new Gate(engine);
   }
@@ -229,7 +279,13 @@ export class KavachInvalidated extends Error {
 
 // ─── Re-exports — middleware helpers ─────────────────────────────
 
-export { McpKavachMiddleware, type McpCallerInfo } from './mcp';
+export {
+  McpKavachMiddleware,
+  InMemorySessionStore,
+  type SessionStore,
+  type McpCallerInfo,
+  type McpMiddlewareOptions,
+} from './mcp';
 export {
   HttpKavachMiddleware,
   type HttpMiddlewareOptions,
