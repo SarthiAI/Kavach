@@ -59,7 +59,7 @@ ctx.bootstrap_.directory_path.write_bytes(new_manifest)
 
 ### Step 3: tell every verifier to reload
 
-`FilePublicKeyDirectory` exposes `.reload()`; `HttpPublicKeyDirectory` will pick up the new manifest on its next scheduled refresh (ETag busts to a full 200). For a file-backed setup the fastest path is a reload endpoint your service exposes:
+`FilePublicKeyDirectory` exposes `.reload()`; `HttpPublicKeyDirectory` *(experimental, validation pending; see [roadmap.md](../roadmap.md))* will pick up the new manifest on its next scheduled refresh (ETag busts to a full 200). For a file-backed setup the fastest path is a reload endpoint your service exposes:
 
 ```rust
 // inside the verifier service
@@ -115,33 +115,27 @@ let fixed = PolicySet::from_file("kavach.toml")?;   // or from_toml(&new_text)
 policy_engine.reload(fixed);
 ```
 
-Via SDK (HTTP admin endpoint the e2e harness exposes, trimmed down):
+From the Python SDK:
 
 ```python
-# POST /agent/reload   body: {"policy_toml": "...new TOML..."}
-await client.post(f"http://{AGENT_HOST}:{AGENT_PORT}/agent/reload",
-                  json={"policy_toml": fixed_toml})
+gate.reload(fixed_toml)   # raises ValueError on parse error, previous set stays
+```
+
+From the Node SDK:
+
+```typescript
+gate.reload(fixedToml);   // throws on parse error, previous set stays
 ```
 
 ### Option B: kill-switch (empty policy)
 
 If you cannot fix-forward fast enough, reload with an **empty TOML**. Empty is valid: `PolicySet::from_toml("")` produces a zero-rule set, and with no matching rules, `PolicyEngine` returns `Refuse { code: NoPolicyMatch }` for every action. The gate is effectively off for any action it can reach.
 
-```
-POST /agent/reload    body: {"policy_toml": ""}
-```
-
-From [hard_runner.py::s04_kill_switch](../../e2e-tests/hard_runner.py):
-
 ```python
-r = await client.post(
-    f"http://{AGENT_HOST}:{AGENT_PORT}/agent/reload",
-    json={"policy_toml": ""},
-)
-assert r.status_code == 200
+gate.reload("")
 ```
 
-The hard suite asserts that between reload completion and the first post-reload refusal, the elapsed time is under 200 ms, with zero permits leaking through after reload:
+From [hard_runner.py::s04_kill_switch](../../e2e-tests/hard_runner.py), the harness exercises this against a live service and asserts that between reload completion and the first post-reload refusal, the elapsed time is under 200 ms, with zero permits leaking through after reload:
 
 ```python
 delta_ms = (timeline.first_refuse_after_reload_at - timeline.reload_completed_at) * 1000
@@ -162,6 +156,8 @@ If you run with the `watcher` feature enabled on `kavach-core`, `spawn_policy_wa
 ---
 
 ## 3. Session-level compromise
+
+> **Cross-node fan-out is experimental.** The local invalidation path is consumer-validated (it's exercised by `business-tests/` via `InMemoryInvalidationBroadcaster`), but the Redis-backed cross-node fan-out the playbook below assumes (`RedisInvalidationBroadcaster`, `spawn_session_store_listener` against a `RedisSessionStore`) is not yet covered by the consumer-validation harness. The Rust-level integration tests pass. Treat the multi-node portion of this playbook as a reference until validation lands; see [roadmap.md](../roadmap.md).
 
 **Signal:** a session is known to be misbehaving, or an evaluator has emitted `Invalidate`. The local gate is already refusing; the concern is whether every *other* node holding the same session also stops honoring it.
 

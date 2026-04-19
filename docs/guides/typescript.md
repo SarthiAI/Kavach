@@ -1,8 +1,8 @@
 # TypeScript / Node integration guide
 
-The Node SDK is a napi-rs binding to the compiled Rust engine. Every `evaluate()` call crosses FFI into `kavach-core`; no gate logic runs in JavaScript. This guide covers the idiomatic TS surface: the `Gate` wrapper, options shapes, error classes, middleware factories, PQ crypto helpers, and hot reload.
+The Node SDK is a napi-rs binding to the compiled Rust engine. Every `evaluate()` call crosses FFI into `kavach-core`; no gate logic runs in JavaScript. This guide covers the idiomatic TS surface: the `Gate` wrapper, options shapes, error classes, PQ crypto helpers, and hot reload.
 
-For the Rust surface underneath, see [rust.md](rust.md). For the Python equivalent, see [python.md](python.md).
+For the Rust surface underneath, see [rust.md](rust.md). For the Python equivalent, see [python.md](python.md). For the operator-edited TOML workflow, see [toml-policies.md](toml-policies.md).
 
 ---
 
@@ -15,9 +15,7 @@ npm install kavach
 Native addons ship for Linux x64/arm64 and macOS x64/arm64. Node 20+ is supported.
 
 ```typescript
-import { Gate } from 'kavach';                   // core
-import { createExpressMiddleware } from 'kavach'; // http
-import { McpKavachMiddleware } from 'kavach';     // mcp
+import { Gate } from 'kavach';
 ```
 
 ---
@@ -27,18 +25,22 @@ import { McpKavachMiddleware } from 'kavach';     // mcp
 ```typescript
 import { Gate } from 'kavach';
 
-const POLICY = `
-[[policy]]
-name = "agent_small_refunds"
-effect = "permit"
-conditions = [
-    { identity_kind = "agent" },
-    { action = "issue_refund" },
-    { param_max = { field = "amount", max = 1000.0 } },
-]
-`;
+// Policy as a plain JS object. No separate config format to learn.
+const POLICY = {
+  policies: [
+    {
+      name: 'agent_small_refunds',
+      effect: 'permit',
+      conditions: [
+        { identity_kind: 'agent' },
+        { action: 'issue_refund' },
+        { param_max: { field: 'amount', max: 1000.0 } },
+      ],
+    },
+  ],
+};
 
-const gate = Gate.fromToml(POLICY, {
+const gate = Gate.fromObject(POLICY, {
   invariants: [{ name: 'hard_cap', field: 'amount', maxValue: 50_000 }],
 });
 
@@ -56,7 +58,7 @@ if (verdict.isPermit) {
 }
 ```
 
-An empty policy string is valid. It default-denies, which is the kill-switch shape.
+An empty policy set is valid. It default-denies, which is the kill-switch shape.
 
 ---
 
@@ -67,14 +69,14 @@ Five factories, all accepting the same `GateOptions`. Pick whichever fits how yo
 ```typescript
 import { Gate, GateOptions } from 'kavach';
 
-Gate.fromToml(policyToml: string,    options?: GateOptions): Gate  // TOML string
-Gate.fromFile(path: string,          options?: GateOptions): Gate  // TOML file
-Gate.fromObject(policies: object,    options?: GateOptions): Gate  // native JS object
+Gate.fromObject(policies: object,    options?: GateOptions): Gate  // native JS object (recommended)
 Gate.fromJsonString(json: string,    options?: GateOptions): Gate  // JSON string (wire body)
 Gate.fromJsonFile(path: string,      options?: GateOptions): Gate  // JSON file on disk
+Gate.fromToml(policyToml: string,    options?: GateOptions): Gate  // operator-edited TOML string
+Gate.fromFile(path: string,          options?: GateOptions): Gate  // TOML file on disk
 ```
 
-All five share the same condition vocabulary; see [reference/policy-language.md](../reference/policy-language.md) for the full grammar. Typo'd or unknown field names throw a clear error in every loader. Example:
+All five share the same condition vocabulary; see [../reference/policy-language.md](../reference/policy-language.md) for the full grammar. Typo'd or unknown field names throw a clear error in every loader. Example:
 
 ```typescript
 const gate = Gate.fromObject({
@@ -93,7 +95,7 @@ const gate = Gate.fromObject({
 });
 ```
 
-For programmatic policy construction (admin UI submissions, database rows, feature flags), `fromObject` is usually the cleanest path: build the object however you like, hand it to the gate, no string templating.
+For programmatic policy construction (admin UI submissions, database rows, feature flags), `fromObject` is the cleanest path: build the object however you like, hand it to the gate, no string templating. For policies operators hand-edit and commit to git, use the TOML loaders; see [toml-policies.md](toml-policies.md).
 
 `GateOptions` shape:
 
@@ -184,109 +186,6 @@ try {
 
 ---
 
-## `guardTool` for MCP
-
-`McpKavachMiddleware` wraps MCP tool handlers.
-
-```typescript
-import { Gate, McpKavachMiddleware, KavachRefused } from 'kavach';
-
-const gate = Gate.fromFile('kavach.toml');
-const kavach = new McpKavachMiddleware(gate);
-
-// Style 1: throw on block.
-kavach.checkToolCall(
-  'issue_refund',
-  { amount: 500, orderId: 'ORD-123' },
-  { callerId: 'agent-bot', callerKind: 'agent', roles: ['support'] },
-);
-
-// Style 2: get the verdict back.
-const verdict = kavach.evaluateToolCall(
-  'issue_refund',
-  { amount: 500 },
-  { callerId: 'agent-bot', callerKind: 'agent' },
-);
-
-// Style 3: wrap a handler.
-const guardedRefund = kavach.guardTool(
-  'issue_refund',
-  async (params) => processRefund(params),
-  { callerId: 'agent-bot', callerKind: 'agent' },
-);
-const result = await guardedRefund({ amount: 500, orderId: 'ORD-123' });
-```
-
-`McpCallerInfo` accepts `callerId`, `callerKind`, `roles`, `sessionId`, `ip`, `currentGeo`, `originGeo`.
-
----
-
-## HTTP middleware
-
-### Express
-
-```typescript
-import express from 'express';
-import { Gate, createExpressMiddleware } from 'kavach';
-
-const app = express();
-app.use(express.json());
-
-const gate = Gate.fromFile('kavach.toml');
-app.use(createExpressMiddleware(gate, {
-  gateMutationsOnly: true,                     // default
-  excludedPaths: ['/health', '/ready', '/metrics'],
-  principalHeader: 'x-principal-id',           // headers are configurable
-  rolesHeader: 'x-roles',
-  kindHeader: 'x-principal-kind',
-  geoResolver: ({ headers, ip }) => {
-    // Plug in MaxMind, CDN edge headers, whatever.
-    return { currentGeo: undefined, originGeo: undefined };
-  },
-}));
-
-app.post('/api/refunds', (req, res) => {
-  // If we reach here, Kavach permitted.
-  res.json({ status: 'refunded' });
-});
-```
-
-Express middleware returns `403` on Refuse and `401` on Invalidate by default.
-
-### Fastify
-
-```typescript
-import Fastify from 'fastify';
-import { Gate, createFastifyHook } from 'kavach';
-
-const app = Fastify();
-const gate = Gate.fromFile('kavach.toml');
-app.addHook('preHandler', createFastifyHook(gate));
-```
-
-### Framework-agnostic core
-
-`HttpKavachMiddleware` is the framework-agnostic core; both factories wrap it. Use it directly for Hono, Koa, or custom handlers:
-
-```typescript
-import { HttpKavachMiddleware } from 'kavach';
-
-const middleware = new HttpKavachMiddleware(gate, { gateMutationsOnly: true });
-const verdict = middleware.evaluate({
-  method: 'POST',
-  path: '/api/v1/refunds',
-  headers: req.headers,
-  body: req.body,
-  ip: req.ip,
-  currentGeo: undefined,    // explicit geo beats the configured resolver
-  originGeo: undefined,
-});
-```
-
-Action names are auto-derived from HTTP method + path via `deriveActionName`: `POST /api/v1/refunds` becomes `refunds.create`.
-
----
-
 ## Signed permit tokens: `PqTokenSigner`
 
 ```typescript
@@ -295,7 +194,7 @@ import { Gate, PqTokenSigner } from 'kavach';
 const signer = PqTokenSigner.generateHybrid();    // ML-DSA-65 + Ed25519
 // const signer = PqTokenSigner.generatePqOnly(); // ML-DSA-65 only
 
-const gate = Gate.fromToml(POLICY, { tokenSigner: signer });
+const gate = Gate.fromObject(POLICY, { tokenSigner: signer });
 const verdict = gate.evaluate({ /* ... */ });
 
 if (verdict.isPermit && verdict.permitToken && verdict.signature) {
@@ -449,21 +348,15 @@ Replay, ciphertext tamper, wrong recipient, wrong `expectedContextId`, and unsig
 
 ## In-process invalidation
 
-The Node SDK ships an in-process `InMemoryInvalidationBroadcaster` plus a listener bridge. Wire them up when you want every `Invalidate` verdict in the process to fan out to an MCP session store, an HTTP session cache, a metrics sink, or anything else that needs to react.
+The Node SDK ships an in-process `InMemoryInvalidationBroadcaster` plus a listener bridge. Wire them up when you want every `Invalidate` verdict in the process to fan out to a metrics sink, a downstream cache, or anything else that needs to react.
 
 ```typescript
 import {
-  Gate,
-  InMemoryInvalidationBroadcaster, InMemorySessionStore,
-  McpKavachMiddleware, spawnInvalidationListener,
+  Gate, InMemoryInvalidationBroadcaster, spawnInvalidationListener,
 } from 'kavach';
 
 const broadcaster = new InMemoryInvalidationBroadcaster();
-const gate = Gate.fromToml(POLICY, { broadcaster });
-
-// McpKavachMiddleware can share a session store so invalidations propagate
-// to every tool call on this process.
-const mcp = new McpKavachMiddleware(gate, { sessionStore: new InMemorySessionStore() });
+const gate = Gate.fromObject(POLICY, { broadcaster });
 
 const handle = spawnInvalidationListener(broadcaster, (scope) => {
   console.log(`invalidated: ${scope.target} (${scope.reason})`);
@@ -475,42 +368,28 @@ handle.abort();
 
 `InvalidationScopeView` exposes `.target` (session / principal / role), `.reason`, and `.evaluator`. Listener callback errors are caught and logged; they do not kill the listener.
 
-For multi-replica deployments the canonical fan-out is Redis Pub/Sub; the Rust-side `RedisInvalidationBroadcaster` is documented in [guides/distributed.md](distributed.md). The Node SDK does not ship a Redis binding yet; bridge to the Rust layer through a sidecar, or pair this in-process broadcaster with a Redis-backed listener you implement alongside your session cache.
+The Node SDK does not ship a Redis binding yet. For multi-replica deployments the canonical fan-out is Redis Pub/Sub on the Rust side; see [distributed.md](distributed.md). Bridge to the Rust layer through a sidecar, or pair this in-process broadcaster with a Redis-backed listener you implement alongside your session cache.
 
 ---
 
 ## Hot reload
 
+`gate.reload(...)` accepts a TOML string. Throws on parse error; the previous good set stays live. Empty TOML is valid and default-denies.
+
 ```typescript
 gate.reload(newPolicyToml);
 ```
 
-Throws on parse error; the previous good set stays live. Empty TOML is valid and default-denies.
-
-For file-watched reload, pair with `chokidar` or `fs.watch`:
-
-```typescript
-import { watch } from 'fs';
-import { readFileSync } from 'fs';
-
-watch('kavach.toml', { persistent: true }, () => {
-  try {
-    gate.reload(readFileSync('kavach.toml', 'utf-8'));
-  } catch (err) {
-    console.error('bad policy file, keeping previous set:', err);
-  }
-});
-```
+For the full reload workflow (including the file-watcher pattern and the empty-TOML kill switch), see [toml-policies.md](toml-policies.md).
 
 ---
 
 ## End-to-end example
 
-One file, runnable end to end. Exercises policies, invariants, signed tokens, audit chain, directory, secure channel, hot reload, and the Express middleware.
+One file, runnable end to end. Exercises policies, invariants, signed tokens, audit chain, directory, secure channel, and hot reload.
 
 ```typescript
 // examples/ts_guide.ts
-import express from 'express';
 import { writeFileSync } from 'fs';
 import { randomUUID } from 'crypto';
 import {
@@ -519,37 +398,38 @@ import {
   Gate,
   KavachKeyPair,
   KavachRefused,
-  McpKavachMiddleware,
   PqTokenSigner,
   PublicKeyDirectory,
   SecureChannel,
   SignedAuditChain,
-  createExpressMiddleware,
   type PermitTokenInput,
 } from 'kavach';
 
-const POLICY = `
-[[policy]]
-name = "support_small_refunds"
-effect = "permit"
-conditions = [
-    { identity_role = "support" },
-    { action = "refunds.create" },
-    { param_max = { field = "amount", max = 5000.0 } },
-]
-
-[[policy]]
-name = "allow_fetch_report"
-effect = "permit"
-conditions = [
-    { action = "fetch_report" },
-]
-`;
+const POLICY = {
+  policies: [
+    {
+      name: 'support_small_refunds',
+      effect: 'permit',
+      conditions: [
+        { identity_role: 'support' },
+        { action: 'refunds.create' },
+        { param_max: { field: 'amount', max: 5000.0 } },
+      ],
+    },
+    {
+      name: 'allow_fetch_report',
+      effect: 'permit',
+      conditions: [
+        { action: 'fetch_report' },
+      ],
+    },
+  ],
+};
 
 async function main() {
   // 1. Signed gate.
   const signer = PqTokenSigner.generateHybrid();
-  const gate = Gate.fromToml(POLICY, {
+  const gate = Gate.fromObject(POLICY, {
     invariants: [{ name: 'hard_cap', field: 'amount', maxValue: 10_000 }],
     tokenSigner: signer,
     geoDriftMaxKm: 500,
@@ -587,24 +467,7 @@ async function main() {
   });
   console.log('over-cap blocked:', blocked.isRefuse, blocked.reason);
 
-  // 4. MCP middleware with guardTool.
-  const mcp = new McpKavachMiddleware(gate);
-  const guardedRefund = mcp.guardTool(
-    'refunds.create',
-    async (params: Record<string, unknown>) => ({ ok: true, amount: params.amount }),
-    { callerId: 'agent-alice', callerKind: 'agent', roles: ['support'] },
-  );
-  console.log('mcp permit:', await guardedRefund({ amount: 500 }));
-
-  try {
-    await guardedRefund({ amount: 999_999 });
-  } catch (err) {
-    if (err instanceof KavachRefused) {
-      console.log('mcp blocked:', err.code, err.reason);
-    }
-  }
-
-  // 5. Signed audit chain.
+  // 4. Signed audit chain.
   const kp = KavachKeyPair.generate();
   const chain = new SignedAuditChain(kp, true);
   chain.append(AuditEntry.new('agent-alice', 'refunds.create', 'permit', 'token=abc'));
@@ -613,7 +476,7 @@ async function main() {
   const blob = chain.exportJsonl();
   SignedAuditChain.verifyJsonl(blob, kp.publicKeys());
 
-  // 6. Directory + DirectoryTokenVerifier.
+  // 5. Directory + DirectoryTokenVerifier.
   const root = KavachKeyPair.generate();
   const manifestPath = '/tmp/kavach-directory.json';
   writeFileSync(manifestPath, root.buildSignedManifest([kp.publicKeys()]));
@@ -634,7 +497,7 @@ async function main() {
   new DirectoryTokenVerifier(directory, true).verify(token, sig);
   console.log('directory-backed verify ok');
 
-  // 7. Secure channel.
+  // 6. Secure channel.
   const alice = KavachKeyPair.generate();
   const bob = KavachKeyPair.generate();
   const aliceCh = new SecureChannel(alice, bob.publicKeys());
@@ -643,22 +506,12 @@ async function main() {
   const plaintext = bobCh.receiveSigned(sealed, 'greet');
   console.log('secure channel ok:', plaintext.toString());
 
-  // 8. Hot reload.
+  // 7. Hot reload.
   gate.reload('');
   console.log('default-deny after reload(""):', gate.evaluate({
     principalId: 'agent-alice', principalKind: 'agent', actionName: 'refunds.create',
     roles: ['support'], params: { amount: 100 },
   }).isRefuse);
-  gate.reload(POLICY);
-
-  // 9. Express integration, fire up a small server if RUN_SERVER is set.
-  if (process.env.RUN_SERVER) {
-    const app = express();
-    app.use(express.json());
-    app.use(createExpressMiddleware(gate, { gateMutationsOnly: true }));
-    app.post('/api/refunds', (req, res) => res.json({ status: 'refunded', body: req.body }));
-    app.listen(3000, () => console.log('listening on :3000'));
-  }
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });
@@ -671,14 +524,15 @@ npx tsc examples/ts_guide.ts --target es2020 --module commonjs --esModuleInterop
 node examples/ts_guide.js
 ```
 
-The smoke test at `Kavach/kavach-node/npm/tests/smoke_test.ts` is the authoritative reference for every SDK surface (15 groups covering Gate, signer, keypair, audit chain, secure channel, directory, geo drift, and middleware).
+The smoke test at `Kavach/kavach-node/npm/tests/smoke_test.ts` is the authoritative reference for every SDK surface.
 
 ---
 
 ## Next
 
-- [concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md), Permit / Refuse / Invalidate semantics.
-- [concepts/post-quantum.md](../concepts/post-quantum.md), what hybrid means, and why.
-- [concepts/audit.md](../concepts/audit.md), SignedAuditChain internals.
-- [guides/distributed.md](distributed.md), multi-node invalidation + Redis stores.
-- [reference/policy-language.md](../reference/policy-language.md), full condition reference.
+- [../concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md): Permit / Refuse / Invalidate semantics.
+- [../concepts/post-quantum.md](../concepts/post-quantum.md): what hybrid means, and why.
+- [../concepts/audit.md](../concepts/audit.md): SignedAuditChain internals.
+- [toml-policies.md](toml-policies.md): operator-edited TOML workflow.
+- [distributed.md](distributed.md): multi-node invalidation + Redis stores.
+- [../reference/policy-language.md](../reference/policy-language.md): full condition reference.

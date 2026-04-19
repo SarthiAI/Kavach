@@ -16,7 +16,7 @@ Cross-links:
 
 ## Enabling tracing at startup
 
-`tracing_subscriber` is the standard consumer. The example services under `kavach-http/examples/` do not install it (they use `println!` for readability), so here is the minimal snippet to drop into a real service's `main`:
+`tracing_subscriber` is the standard consumer. The minimal snippet to drop into a real service's `main`:
 
 ```rust
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -59,9 +59,8 @@ The target tree roughly mirrors the crate tree:
 | `kavach_core::watcher` | policy file reload results |
 | `kavach_pq::audit` | signing, chain append |
 | `kavach_pq::directory` | key-directory fetch/reload, root-signature verify |
-| `kavach_pq::http_directory` | ETag hits, stale-cache fallbacks |
-| `kavach_redis::*` | Redis round-trip failures, bridge reconnects |
-| `kavach_http` | HTTP middleware gating decisions, body-size skips |
+| `kavach_pq::http_directory` *(experimental)* | ETag hits, stale-cache fallbacks |
+| `kavach_redis::*` *(experimental)* | Redis round-trip failures, bridge reconnects |
 
 Representative events (grep the source for the exact wording):
 
@@ -161,7 +160,7 @@ Kavach does not emit metrics directly. The common pattern is to install a `traci
 - `kavach_store_error_total{store=rate_limit|session, op=record|count|get|put}`.
 - `kavach_broadcast_error_total{broadcaster}`.
 
-Everything else (latency, request volume) you already have at the HTTP layer.
+Everything else (latency, request volume) you already have at your service's request-handling layer.
 
 ### Python / Node SDK
 

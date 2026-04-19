@@ -12,9 +12,11 @@ The same policy can be written in three formats. Pick the one that fits how you 
 
 | Format | Best for | Loader |
 |--------|----------|--------|
-| **TOML** | Hand-edited operator config; file watchers; everything an SRE checks into git | `Gate.from_toml` / `Gate.from_file` (Rust, Python, Node) |
-| **Native dict / object** | Programmatic policy construction (admin UI, database row, feature flag service) | `Gate.from_dict` (Python) / `Gate.fromObject` (Node) |
-| **JSON file** | Tooling that already speaks JSON (Kubernetes ConfigMaps, secrets managers, REST APIs that emit JSON) | `Gate.from_json_file` / `Gate.from_json_string` (Python) / `Gate.fromJsonFile` / `Gate.fromJsonString` (Node) |
+| **Native dict / object** | Programmatic policy construction from Python or Node (admin UI, database row, feature flag service) | `Gate.from_dict` (Python) / `Gate.fromObject` (Node) |
+| **JSON file / string** | Tooling that already speaks JSON (Kubernetes ConfigMaps, secrets managers, REST APIs that emit JSON) | `Gate.from_json_file` / `Gate.from_json_string` (Python) / `Gate.fromJsonFile` / `Gate.fromJsonString` (Node) |
+| **TOML** | Hand-edited operator config; file watchers; everything an SRE checks into git | `PolicySet::from_toml` / `from_file` (Rust), `Gate.from_toml` / `Gate.from_file` (Python), `Gate.fromToml` / `Gate.fromFile` (Node) |
+
+For the operator workflow (the same TOML file loaded from Rust, Python, and Node side by side), see [../guides/toml-policies.md](../guides/toml-policies.md).
 
 The condition vocabulary, field names, defaults, and fail-closed semantics are identical across formats. Mixing or switching formats does not change behavior.
 
@@ -461,4 +463,5 @@ Any request that matches none of these five policies is refused by default-deny 
 - [concepts/policies.md](../concepts/policies.md), conceptual model.
 - [reference/api-surface.md](api-surface.md), type index across all crates.
 - [guides/rust.md](../guides/rust.md), [guides/python.md](../guides/python.md), [guides/typescript.md](../guides/typescript.md), SDK usage.
+- [guides/toml-policies.md](../guides/toml-policies.md), the operator-edited TOML workflow with Rust / Python / Node examples side by side.
 - [operations/deployment-patterns.md](../operations/deployment-patterns.md), hot-reload and multi-node rate-limit setups.

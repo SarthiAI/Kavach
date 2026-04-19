@@ -170,6 +170,10 @@ The root ML-DSA-65 VK is pinned out-of-band (typically shipped in config or bake
 
 ### `HttpPublicKeyDirectory` (feature `http`)
 
+> **Experimental. Not yet thoroughly validated.**
+>
+> The Rust-level unit tests for `HttpPublicKeyDirectory` pass (hand-rolled Tokio HTTP stub covers the happy path, ETag reuse, 304 round-trip, cold-cache `BackendUnavailable`, and warm-cache survive-transient-outage), but the consumer-validation harness at `business-tests/` does not yet exercise this path end to end. Early adopters can wire it up; the code is shipped behind the opt-in `http` feature. Treat this section as a reference until validation lands; see [../roadmap.md](../roadmap.md).
+
 Enable in `Cargo.toml`:
 
 ```toml

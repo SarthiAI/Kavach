@@ -23,20 +23,24 @@ Native addons are published for Linux x64/arm64 and macOS x64/arm64. Node 20+.
 ## 60-second quickstart
 
 ```typescript
-import { Gate } from 'kavach';
+import { Gate, type EvaluateOptions } from 'kavach';
 
-const POLICY = `
-[[policy]]
-name = "agent_small_refunds"
-effect = "permit"
-conditions = [
-    { identity_kind = "agent" },
-    { action = "issue_refund" },
-    { param_max = { field = "amount", max = 1000.0 } },
-]
-`;
+// Policy as a plain JS object. No separate config format to learn.
+const POLICY = {
+  policies: [
+    {
+      name: 'agent_small_refunds',
+      effect: 'permit',
+      conditions: [
+        { identity_kind: 'agent' },
+        { action: 'issue_refund' },
+        { param_max: { field: 'amount', max: 1000 } },
+      ],
+    },
+  ],
+};
 
-const gate = Gate.fromToml(POLICY, {
+const gate = Gate.fromObject(POLICY, {
   invariants: [{ name: 'hard_cap', field: 'amount', maxValue: 50_000 }],
 });
 
@@ -48,7 +52,7 @@ const verdict = gate.evaluate({
 });
 
 if (verdict.isPermit) {
-  processRefund();
+  console.log('permit', verdict.tokenId);
 } else {
   console.log(`blocked: [${verdict.code}] ${verdict.evaluator}: ${verdict.reason}`);
 }
@@ -56,72 +60,24 @@ if (verdict.isPermit) {
 
 A policy set with no matching permit Refuses by default. There is no implicit allow.
 
-### Three ways to load a policy
+### Loading a policy
 
-The same vocabulary works in TOML, a plain JS object, or a JSON file. Pick whichever fits your workflow.
+The recommended surface for Node is a plain JS object (admin UI submissions, database rows, feature flags):
 
 ```typescript
-const gate = Gate.fromToml(tomlString);          // operator-edited TOML
-const gate = Gate.fromFile('kavach.toml');       // TOML file on disk
-const gate = Gate.fromObject(policyObject);      // native object (admin UI, DB row, etc.)
+const gate = Gate.fromObject(policyObject);      // native object (recommended)
 const gate = Gate.fromJsonString(jsonString);    // JSON over the wire
 const gate = Gate.fromJsonFile('kavach.json');   // JSON file on disk
 ```
 
-Typo'd field names (`{ idnetity_kind: 'agent' }`) throw a clear error in every loader instead of being silently dropped, so a misspelled condition cannot quietly weaken a policy.
-
----
-
-## MCP tool gating
+For operator-owned config that lives in git and is hand-edited, use TOML:
 
 ```typescript
-import { Gate, McpKavachMiddleware } from 'kavach';
-
-const gate = Gate.fromFile('kavach.toml');
-const kavach = new McpKavachMiddleware(gate);
-
-// In your MCP tool handler:
-kavach.checkToolCall(
-  'issue_refund',
-  { amount: 500, orderId: 'ORD-123' },
-  { callerId: 'agent-bot', callerKind: 'agent' },
-);
-// Throws KavachRefused if blocked, KavachInvalidated if session revoked.
+const gate = Gate.fromToml(tomlString);          // operator-edited TOML
+const gate = Gate.fromFile('kavach.toml');       // TOML file on disk
 ```
 
-## Express middleware
-
-```typescript
-import express from 'express';
-import { Gate, createExpressMiddleware } from 'kavach';
-
-const app = express();
-const gate = Gate.fromFile('kavach.toml');
-app.use(createExpressMiddleware(gate, { gateMutationsOnly: true }));
-```
-
-## Fastify hook
-
-```typescript
-import Fastify from 'fastify';
-import { Gate, createFastifyHook } from 'kavach';
-
-const app = Fastify();
-const gate = Gate.fromFile('kavach.toml');
-app.addHook('preHandler', createFastifyHook(gate));
-```
-
-## guardTool wrapper
-
-```typescript
-const guardedRefund = kavach.guardTool(
-  'issue_refund',
-  async (params) => processRefund(params),
-  { callerId: 'agent-bot', callerKind: 'agent' },
-);
-
-const result = await guardedRefund({ amount: 500, orderId: 'ORD-123' });
-```
+Typo'd field names (`{ idnetity_kind: 'agent' }`) throw a clear error in every loader instead of being silently dropped, so a misspelled condition cannot quietly weaken a policy. The full TOML workflow (rendered in Rust, Python, and Node) lives at [docs/guides/toml-policies.md](https://github.com/SarthiAI/Kavach/blob/main/docs/guides/toml-policies.md).
 
 ---
 
@@ -135,7 +91,7 @@ When a `PqTokenSigner` is attached to a gate, every Permit verdict carries an ML
 import { Gate, PqTokenSigner } from 'kavach';
 
 const signer = PqTokenSigner.generateHybrid();
-const gate = Gate.fromToml(POLICY, { tokenSigner: signer });
+const gate = Gate.fromObject(POLICY, { tokenSigner: signer });
 
 const verdict = gate.evaluate({ /* ... */ });
 if (verdict.isPermit) {
@@ -233,7 +189,7 @@ In-memory (`PublicKeyDirectory.inMemory([...])`) and unsigned-file variants are 
 Same-country IP hops become Warnings instead of Violations when you provide lat/lon and a threshold:
 
 ```typescript
-const gate = Gate.fromToml(POLICY, { geoDriftMaxKm: 500 });
+const gate = Gate.fromObject(POLICY, { geoDriftMaxKm: 500 });
 
 const verdict = gate.evaluate({
   principalId: 'u',
@@ -250,23 +206,23 @@ Missing geo with a threshold set still **fails closed**. The SDK does not silent
 
 ### Policy hot reload
 
+`gate.reload(...)` accepts a TOML string; it throws on parse error and leaves the previous good set in place. See [docs/guides/toml-policies.md](https://github.com/SarthiAI/Kavach/blob/main/docs/guides/toml-policies.md) for the full reload workflow (including the file-watcher pattern and the empty-TOML kill switch).
+
 ```typescript
 gate.reload(newPolicyToml);   // parse error throws, previous set preserved
 ```
 
 ### In-process invalidation
 
-Fan out `Invalidate` verdicts to everything on this node that needs to react (MCP session store, HTTP session cache, metrics, kill-session hooks):
+Fan out `Invalidate` verdicts to anything on this node that needs to react (metrics, kill-session hooks, downstream caches):
 
 ```typescript
 import {
-  Gate, InMemoryInvalidationBroadcaster, InMemorySessionStore,
-  McpKavachMiddleware, spawnInvalidationListener,
+  Gate, InMemoryInvalidationBroadcaster, spawnInvalidationListener,
 } from 'kavach';
 
 const broadcaster = new InMemoryInvalidationBroadcaster();
-const gate = Gate.fromToml(POLICY, { broadcaster });
-const mcp = new McpKavachMiddleware(gate, { sessionStore: new InMemorySessionStore() });
+const gate = Gate.fromObject(POLICY, { broadcaster });
 
 const handle = spawnInvalidationListener(broadcaster, (scope) => {
   console.log(`invalidated: ${scope.target} (${scope.reason})`);
@@ -274,7 +230,7 @@ const handle = spawnInvalidationListener(broadcaster, (scope) => {
 // handle.abort() on shutdown
 ```
 
-The Node SDK currently ships the in-process broadcaster only; multi-replica Redis fan-out lives on the Rust side (see [docs/guides/distributed.md](https://github.com/SarthiAI/Kavach/blob/main/docs/guides/distributed.md)).
+The Node SDK ships the in-process broadcaster only. Multi-replica Redis fan-out lives on the Rust side (see [docs/guides/distributed.md](https://github.com/SarthiAI/Kavach/blob/main/docs/guides/distributed.md)).
 
 ---
 
@@ -283,7 +239,7 @@ The Node SDK currently ships the in-process broadcaster only; multi-replica Redi
 Roll out incrementally: log verdicts without blocking.
 
 ```typescript
-const gate = Gate.fromFile('kavach.toml', { observeOnly: true });
+const gate = Gate.fromObject(POLICY, { observeOnly: true });
 ```
 
 ---
@@ -292,7 +248,7 @@ const gate = Gate.fromFile('kavach.toml', { observeOnly: true });
 
 Every `evaluate()` call crosses FFI into compiled Rust via napi-rs. The TypeScript layer is pure wrappers. The engine implements:
 
-- **Policy:** TOML rules with conditions (`identity_kind`, `action`, `param_max`, `rate_limit`, `time_window` with optional timezone, etc.).
+- **Policy:** a small, fixed condition vocabulary (`identity_kind`, `action`, `param_max`, `rate_limit`, `time_window` with optional timezone, etc.) expressed as a JS object, JSON, or operator-edited TOML.
 - **Drift detectors:** IP / geo, session age, device, behavior.
 - **Invariants:** hard per-action limits that cannot be overridden by policy.
 - **Post-quantum crypto:** ML-DSA-65, ML-KEM-768, Ed25519, X25519, ChaCha20-Poly1305.

@@ -1,8 +1,12 @@
 # Distributed deployments
 
+> **Experimental. Not yet thoroughly validated.**
+>
+> The `kavach-redis` crate has Rust-level integration tests (run with `TEST_REDIS_URL=redis://... cargo test -p kavach-redis`) and the code has been exercised end to end by the authors, but the consumer-validation harness at `business-tests/` does not yet cover the multi-replica deployment story described below. The code is shipped on crates.io and the Python SDK exposes `RedisRateLimitStore` / `RedisSessionStore` / `RedisInvalidationBroadcaster` as classes, so nothing prevents an early adopter from wiring it up; just treat this guide as a reference rather than a production guarantee. Thorough end-to-end validation is tracked in the [roadmap](../roadmap.md).
+
 Single-node Kavach uses three process-local stores: `InMemoryRateLimitStore`, `InMemorySessionStore`, `NoopInvalidationBroadcaster`. That's fine until one of these becomes true:
 
-1. **You run more than one node.** Two HTTP or MCP replicas behind a load balancer, each with its own in-memory rate-limit counter, each letting the caller do 20 refunds per hour: the actual cap becomes `20 × replicas`. Rate limits only work if counters are shared.
+1. **You run more than one node.** Two replicas behind a load balancer, each with its own in-memory rate-limit counter, each letting the caller do 20 refunds per hour: the actual cap becomes `20 * replicas`. Rate limits only work if counters are shared.
 2. **You need session invalidation to propagate.** `Verdict::Invalidate` on node A kills the session locally, but node B still honors it until it evaluates the same session and notices something is off. An attacker whose session was killed can hop to node B and keep operating.
 3. **Process restart should preserve session state.** In-memory means "gone on restart." If you rolling-restart your fleet every deploy, every in-flight session dies.
 
@@ -20,7 +24,7 @@ Three types, one per pluggable trait:
 |---|---|---|
 | `RedisRateLimitStore` | `kavach_core::rate_limit::RateLimitStore` | Sliding-window counters in sorted sets. |
 | `RedisSessionStore` | `kavach_core::session_store::SessionStore` | Session state as JSON blobs with TTL. |
-| `RedisInvalidationBroadcaster` | `kavach_core::invalidation::InvalidationBroadcaster` | Pub/Sub → local `tokio::broadcast` bridge. |
+| `RedisInvalidationBroadcaster` | `kavach_core::invalidation::InvalidationBroadcaster` | Pub/Sub to local `tokio::broadcast` bridge. |
 
 All three are cheap to clone (they hold a `redis::aio::ConnectionManager` internally, which is reference-counted and auto-reconnects on transient failures). All three expose `new(client)` and `from_url(url)` constructors.
 
@@ -28,12 +32,10 @@ All three are cheap to clone (they hold a `redis::aio::ConnectionManager` intern
 
 ```toml
 [dependencies]
-kavach-core = "0.1"
+kavach-core  = "0.1"
 kavach-redis = "0.1"
-kavach-http = { version = "0.1", features = ["tower"] }
-kavach-mcp = "0.1"
-redis = "0.26"
-tokio = { version = "1", features = ["full"] }
+redis        = "0.26"
+tokio        = { version = "1", features = ["full"] }
 ```
 
 ---
@@ -44,16 +46,16 @@ tokio = { version = "1", features = ["full"] }
 
 **`record(key, at)`.** Single atomic pipeline: `ZADD` the new member, `ZREMBYSCORE` anything older than `RETENTION_SECS` (24 hours), `EXPIRE` the whole set. Retention matches the in-memory default so the memory profile is identical across deployments.
 
-**`count_in_window(key, now, window_secs)`.** `ZCOUNT` over `(now - window_secs, now]`. The lower bound is exclusive (`(cutoff`), the upper bound is inclusive: this matches the in-memory store so a rate-limit condition evaluates identically under either backend.
+**`count_in_window(key, now, window_secs)`.** `ZCOUNT` over `(now - window_secs, now]`. The lower bound is exclusive, the upper bound is inclusive: this matches the in-memory store so a rate-limit condition evaluates identically under either backend.
 
 **Fail-closed.** Any Redis error from `record` propagates as `RateLimitStoreError::BackendUnavailable`. The gate interprets that as a fail-closed signal:
 
-- `record` error → the *entire* evaluation refuses (we couldn't record the action, so we refuse rather than permit without accounting).
-- `count_in_window` error → the `RateLimit` condition evaluates to `false`, meaning the policy doesn't match, meaning default-deny kicks in.
+- `record` error causes the *entire* evaluation to Refuse (we couldn't record the action, so we refuse rather than permit without accounting).
+- `count_in_window` error makes the `RateLimit` condition evaluate to `false`, meaning the policy doesn't match, meaning default-deny kicks in.
 
-Either way, Redis down ≠ free refunds.
+Either way, Redis down is never "free refunds."
 
-### Wiring
+### Wiring (Rust)
 
 ```rust
 use kavach_core::{Gate, GateConfig, PolicyEngine, PolicySet};
@@ -75,7 +77,18 @@ let gate = Arc::new(Gate::new(
 ));
 ```
 
-Verified behavior (from [kavach-redis/tests/integration.rs](../../kavach-redis/tests/integration.rs)):
+### Wiring (Python)
+
+```python
+from kavach import Gate, RedisRateLimitStore
+
+POLICY = {"policies": [...]}
+
+rate_store = RedisRateLimitStore("redis://127.0.0.1:6379")
+gate = Gate.from_dict(POLICY, rate_store=rate_store)
+```
+
+### Verified behaviour (from kavach-redis integration tests)
 
 ```rust
 use kavach_core::rate_limit::RateLimitStore;
@@ -94,7 +107,7 @@ assert_eq!(
 // Sliding window evicts old entries.
 store.record("caller:agent-bot:issue_refund", 150).await.unwrap();
 store.record("caller:agent-bot:issue_refund", 200).await.unwrap();
-// now=200, window=60s → cutoff=140 → t=150 and t=200 qualify, t=100 does not.
+// now=200, window=60s, cutoff=140, t=150 and t=200 qualify, t=100 does not.
 assert_eq!(
     store.count_in_window("caller:agent-bot:issue_refund", 200, 60).await.unwrap(),
     2,
@@ -105,68 +118,39 @@ assert_eq!(
 
 ## `RedisSessionStore`: shared session state
 
-**Shape.** One Redis key per session: `kavach:session:{session_id}` → JSON-serialized `SessionState`. `SET EX` writes the blob with a TTL; the default TTL is 24 hours.
+**Shape.** One Redis key per session: `kavach:session:{session_id}` maps to a JSON-serialized `SessionState`. `SET EX` writes the blob with a TTL; the default TTL is 24 hours.
 
 **Why TTL, not `cleanup`.** The `SessionStore` trait exposes a `cleanup(max_age_seconds)` method that deletes stale sessions. In the Redis backend this is a no-op that returns `Ok(0)`: Redis expires keys on its own schedule via the TTL set at `put` time, so there's no work for `cleanup` to do. If you want a different max-age, reconstruct the store with a new TTL; don't call `cleanup`.
 
 **TTL = 0 is rejected.** Redis treats `SET EX 0` as "delete immediately," so `RedisSessionStore::with_ttl(client, 0)` returns an error at construction rather than handing you a useless store.
 
-**Fail-closed.** `get` returning `Err` means the gate cannot verify the session, which fails closed upstream: the HTTP / MCP layer refuses the action.
+**Fail-closed.** `get` returning `Err` means the caller cannot verify the session; pair this with an integrator session check that refuses the action on lookup failure.
 
-### Wiring
-
-For MCP:
+### Wiring (Rust)
 
 ```rust
-use kavach_mcp::{McpKavachLayer, McpSessionManager};
 use kavach_redis::RedisSessionStore;
 use std::sync::Arc;
 
 let session_store = Arc::new(
     RedisSessionStore::from_url("redis://127.0.0.1:6379").await?,
 );
-let sessions = McpSessionManager::with_store(session_store);
-let kavach = McpKavachLayer::with_sessions(gate.clone(), sessions);
 ```
 
-For HTTP, the session resolver on `KavachLayer::with_session_fn` can read from the Redis store:
+Use it from your integration layer to look up `SessionState` on each incoming request before handing the context to `Gate::evaluate`.
 
-```rust
-use kavach_core::{SessionStore, SessionState};
-use kavach_http::{HttpRequest, KavachLayer};
-use kavach_redis::RedisSessionStore;
-use std::sync::Arc;
+### Wiring (Python)
 
-let session_store: Arc<dyn SessionStore> = Arc::new(
-    RedisSessionStore::from_url("redis://127.0.0.1:6379").await?,
-);
-
-let layer = KavachLayer::new(http_gate)
-    .with_session_fn({
-        let store = session_store.clone();
-        move |req: &HttpRequest| -> SessionState {
-            let Some(sid) = req.headers.get("x-session-id") else {
-                return SessionState::new();
-            };
-            // Synchronous resolver context; block_in_place is appropriate
-            // because this runs inside a tokio runtime. Alternatively,
-            // pre-populate a local cache.
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(store.get(sid))
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(SessionState::new)
-            })
-        }
-    });
+```python
+from kavach import RedisSessionStore
+session_store = RedisSessionStore("redis://127.0.0.1:6379")
 ```
 
 ---
 
 ## `RedisInvalidationBroadcaster`: cross-node invalidation
 
-**Shape.** The `InvalidationBroadcaster::subscribe()` trait returns a concrete `tokio::sync::broadcast::Receiver`. Redis Pub/Sub has its own stream type, so the Redis implementation spawns a background task that owns the subscription, decodes each message as an `InvalidationScope`, and fans it out through a local `broadcast::Sender`. Callers of `subscribe()` get a receiver on that local sender: which is exactly the type the trait promised.
+**Shape.** The `InvalidationBroadcaster::subscribe()` trait returns a concrete `tokio::sync::broadcast::Receiver`. Redis Pub/Sub has its own stream type, so the Redis implementation spawns a background task that owns the subscription, decodes each message as an `InvalidationScope`, and fans it out through a local `broadcast::Sender`. Callers of `subscribe()` get a receiver on that local sender, which is exactly the type the trait promised.
 
 **Lifecycle.**
 
@@ -176,10 +160,10 @@ let layer = KavachLayer::new(http_gate)
 
 **Fail-closed semantics, but only locally.**
 
-- `publish` error → logged by the gate, but the local `Invalidate` verdict still stands. You already decided to kill the session on this node; Redis being unreachable does not undo that. Invalidation is best-effort *across the fleet* but fail-closed *locally*.
+- `publish` error: logged by the gate, but the local `Invalidate` verdict still stands. You already decided to kill the session on this node; Redis being unreachable does not undo that. Invalidation is best-effort *across the fleet* but fail-closed *locally*.
 - A subscribing node that is currently disconnected from Redis will miss the publish while disconnected. When it reconnects, it picks up the next publish, not the one it missed. This is why `InvalidationBroadcaster` is paired with session state in a shared store: a missed invalidation can still be caught when the node next reads the session and sees `invalidated = true`.
 
-### Wiring
+### Wiring (Rust)
 
 ```rust
 use kavach_core::{Gate, GateConfig};
@@ -199,7 +183,25 @@ let gate = Gate::new(evaluators, GateConfig::default())
 
 Every node in the fleet constructs its broadcaster pointing at the same channel name. Every `Verdict::Invalidate` on any node fans out to every other node's local `broadcast::Sender`, which anything calling `spawn_invalidation_listener` consumes.
 
-### Running a listener
+### Wiring (Python)
+
+```python
+from kavach import Gate, RedisInvalidationBroadcaster, spawn_invalidation_listener
+
+broadcaster = RedisInvalidationBroadcaster(
+    "redis://127.0.0.1:6379",
+    channel="kavach:invalidation",
+)
+gate = Gate.from_dict(POLICY, broadcaster=broadcaster)
+
+handle = spawn_invalidation_listener(
+    broadcaster,
+    lambda scope: print(f"invalidated: {scope.target} ({scope.reason})"),
+)
+# handle.abort() on shutdown
+```
+
+### Running a listener (Rust)
 
 The broadcaster by itself only delivers scopes; to actually flip the session state on receipt, spawn a listener:
 
@@ -207,7 +209,7 @@ The broadcaster by itself only delivers scopes; to actually flip the session sta
 use kavach_core::{invalidation::spawn_session_store_listener, SessionStore};
 use std::sync::Arc;
 
-// Same Redis session store the local gate already writes to. When a remote
+// Same Redis session store the local gate already reads from. When a remote
 // invalidation arrives, we flip `invalidated = true` on the local session
 // row; next evaluation on *this* node will see it.
 let listener_handle = spawn_session_store_listener(
@@ -223,7 +225,7 @@ tokio::spawn(async move {
 });
 ```
 
-For `InvalidationTarget::Principal` or `InvalidationTarget::Role`: where the store-based handler logs "unhandled": use `spawn_invalidation_listener` with a custom closure:
+For `InvalidationTarget::Principal` or `InvalidationTarget::Role` (where the store-based handler logs "unhandled") use `spawn_invalidation_listener` with a custom closure:
 
 ```rust
 use kavach_core::invalidation::{spawn_invalidation_listener, InvalidationTarget};
@@ -233,7 +235,6 @@ let handle = spawn_invalidation_listener(broadcaster.clone(), move |scope| {
     async move {
         match scope.target {
             InvalidationTarget::Principal(id) => {
-                // Scan your sessions and kill every one owned by this principal.
                 revoke_all_sessions_for_principal(&store, &id).await;
             }
             InvalidationTarget::Role(role) => {
@@ -251,22 +252,21 @@ let handle = spawn_invalidation_listener(broadcaster.clone(), move |scope| {
 
 ---
 
-## Putting it all together
+## Putting it all together (Rust)
 
-A two-node HTTP fleet pointed at the same Redis:
+A two-node fleet pointed at the same Redis:
 
 ```rust
 use kavach_core::{
     Evaluator, Gate, GateConfig, PolicyEngine, PolicySet, SessionStore,
     invalidation::spawn_session_store_listener,
 };
-use kavach_http::{HttpGate, HttpMiddlewareConfig, KavachLayer};
 use kavach_redis::{
     RedisInvalidationBroadcaster, RedisRateLimitStore, RedisSessionStore,
 };
 use std::sync::Arc;
 
-async fn build_node() -> anyhow::Result<(KavachLayer, Arc<Gate>)> {
+async fn build_node() -> anyhow::Result<Arc<Gate>> {
     let url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into());
 
     // Shared stores.
@@ -291,30 +291,13 @@ async fn build_node() -> anyhow::Result<(KavachLayer, Arc<Gate>)> {
     // Local listener that flips the shared session blob on remote invalidation.
     let _listener = spawn_session_store_listener(broadcaster.clone(), session_store.clone());
 
-    // HTTP layer with the shared session store feeding the resolver.
-    let http_gate = Arc::new(HttpGate::new(gate.clone(), HttpMiddlewareConfig::default()));
-    let layer = KavachLayer::new(http_gate)
-        .with_session_fn({
-            let store = session_store.clone();
-            move |req| {
-                let Some(sid) = req.headers.get("x-session-id") else {
-                    return Default::default();
-                };
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(store.get(sid))
-                        .ok().flatten().unwrap_or_default()
-                })
-            }
-        });
-
-    Ok((layer, gate))
+    Ok(gate)
 }
 ```
 
 Deploy that same binary twice behind a load balancer. The three stores do their jobs:
 
-- Rate limits on `issue_refund` are counted across both nodes. Caller's 20/hour cap is actually 20/hour, not 40.
+- Rate limits on `issue_refund` are counted across both nodes. A caller's 20/hour cap is actually 20/hour, not 40.
 - Session state lives in Redis with a 24-hour TTL, so a rolling deploy doesn't lose in-flight sessions.
 - `Verdict::Invalidate` on node A lands on node B via Pub/Sub; node B's listener flips the session's `invalidated` flag in the shared Redis blob.
 
@@ -322,7 +305,7 @@ Deploy that same binary twice behind a load balancer. The three stores do their 
 
 ## Cross-instance invalidation test
 
-This is the canonical shape of the two-node test, lifted from [kavach-redis/tests/integration.rs](../../kavach-redis/tests/integration.rs) (`broadcaster_cross_instance_delivery`):
+This is the canonical shape of the two-node test, lifted from [../../kavach-redis/tests/integration.rs](../../kavach-redis/tests/integration.rs) (`broadcaster_cross_instance_delivery`):
 
 ```rust
 use kavach_core::invalidation::InvalidationBroadcaster;
@@ -337,8 +320,8 @@ async fn broadcaster_cross_instance_delivery() {
     let url = std::env::var("TEST_REDIS_URL").expect("TEST_REDIS_URL");
     let channel = format!("test-inv-cross:{}", Uuid::new_v4());
 
-    // Two broadcaster instances sharing a channel: the distributed scenario:
-    // node A publishes, node B receives.
+    // Two broadcaster instances sharing a channel: the distributed scenario.
+    // Node A publishes, node B receives.
     let publisher = RedisInvalidationBroadcaster::from_url(&url, channel.clone())
         .await.unwrap();
     let subscriber = RedisInvalidationBroadcaster::from_url(&url, channel.clone())
@@ -346,7 +329,7 @@ async fn broadcaster_cross_instance_delivery() {
 
     let mut rx = subscriber.subscribe();
 
-    // Give the bridge task a moment to SUBSCRIBE before we PUBLISH , 
+    // Give the bridge task a moment to SUBSCRIBE before we PUBLISH.
     // Redis drops messages published before the subscription is live.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -388,8 +371,7 @@ The 200 ms sleep before the publish is load-bearing: Redis Pub/Sub drops message
 
 ## Further reading
 
-- [concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md): what an invalidation actually means.
-- [concepts/evaluators.md](../concepts/evaluators.md): which evaluators produce `Invalidate` vs. `Refuse`.
-- [operations/deployment-patterns.md](../operations/deployment-patterns.md): rolling-restart, blue-green, canary patterns with a shared Redis.
-- [operations/observability.md](../operations/observability.md): metrics to pull off each store (Redis latency, bridge reconnects, broadcaster lag).
-- [http.md](http.md) and [mcp.md](mcp.md): the two integration paths that sit on top of these stores.
+- [../concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md): what an invalidation actually means.
+- [../concepts/evaluators.md](../concepts/evaluators.md): which evaluators produce `Invalidate` vs. `Refuse`.
+- [../operations/deployment-patterns.md](../operations/deployment-patterns.md): rolling-restart, blue-green, canary patterns with a shared Redis.
+- [../operations/observability.md](../operations/observability.md): metrics to pull off each store (Redis latency, bridge reconnects, broadcaster lag).

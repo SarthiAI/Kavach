@@ -183,4 +183,4 @@ Guidance:
 
 - Verdict variants and `PermitToken` shape: [gate-and-verdicts.md](gate-and-verdicts.md).
 - The built-in policy language: [policies.md](policies.md), full grammar at [reference/policy-language.md](../reference/policy-language.md).
-- Using Kavach from Python / Node (where evaluator composition is pre-baked into `Gate.from_toml`): [guides/python.md](../guides/python.md), [guides/typescript.md](../guides/typescript.md).
+- Using Kavach from Python / Node (where evaluator composition is pre-baked into every `Gate.from_*` factory): [guides/python.md](../guides/python.md), [guides/typescript.md](../guides/typescript.md).

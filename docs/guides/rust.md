@@ -1,8 +1,10 @@
 # Rust integration guide
 
-Kavach is a Rust-native library. `kavach-core` holds the gate, evaluators, policy engine, drift detectors, and invariants. `kavach-pq` layers post-quantum crypto (signed tokens, audit chains, secure channels). `kavach-http` and `kavach-mcp` add framework adapters.
+Kavach is a Rust-native library. `kavach-core` holds the gate, evaluators, policy engine, drift detectors, and invariants. `kavach-pq` layers post-quantum crypto (signed tokens, audit chains, secure channels). `kavach-redis` ships Redis-backed implementations of the distributed stores; see [distributed.md](distributed.md).
 
-This guide covers the core integration surface. For framework glue, see [http.md](http.md) and [mcp.md](mcp.md).
+This guide covers the core integration surface in Rust. For the operator-edited TOML workflow, see [toml-policies.md](toml-policies.md).
+
+> **Scope note.** `kavach-core` and `kavach-pq` have extensive Rust-level unit and integration tests (166 tests at last count, enforced with `RUSTFLAGS="-D warnings"` in CI). The authors' end-to-end consumer-validation harness at `business-tests/` runs through the Python SDK, so direct Rust integration does not share the same scenario-per-capability coverage the SDKs have. The code is production-quality from a core-library perspective; treat the specific integration patterns below as references validated by the Rust test suite and the examples under `Kavach/e2e-tests/`, not by the consumer harness. A Rust-level consumer catalogue is tracked in the [roadmap](../roadmap.md).
 
 ---
 
@@ -16,8 +18,6 @@ Kavach is published as a Cargo workspace. Pick the crates you need.
 [dependencies]
 kavach-core = "0.1"               # gate, evaluators, policies
 kavach-pq   = "0.1"               # signed tokens, audit chains, secure channel
-kavach-http = "0.1"               # HTTP middleware
-kavach-mcp  = "0.1"               # MCP tool gating
 
 tokio       = { version = "1", features = ["full"] }
 serde_json  = "1"
@@ -33,8 +33,7 @@ kavach-pq   = { path = "../Kavach/kavach-pq" }
 Optional features worth knowing:
 
 - `kavach-core/watcher` enables `spawn_policy_watcher` (notify-based hot reload).
-- `kavach-http/tower` enables `KavachLayer` for Axum / Tower stacks.
-- `kavach-http/actix` enables the Actix-web transform.
+- `kavach-pq/http` enables `HttpPublicKeyDirectory` for pulling signed manifests over HTTP.
 
 Building any crate that uses `kavach-py` transitively requires `PYO3_PYTHON` pointing at a compatible interpreter. See the project root's `CLAUDE.md` for the local dev recipe.
 
@@ -333,53 +332,44 @@ Enable the `watcher` feature on `kavach-core` and use `spawn_policy_watcher` for
 
 ## Complete working example
 
-Simulated REST API with Kavach gating mutations. This is a condensed form of `kavach-http/examples/http_api.rs` focused on the core crate plus `kavach-http`.
+A standalone binary that builds the evaluator chain, evaluates a permit path and a refuse path, and prints the audit tail. Uses only `kavach-core` plus the async runtime.
 
 ```rust
 // examples/rust_guide.rs
+use chrono::Utc;
 use kavach_core::{
-    AuditLog, AuditSink, DriftEvaluator, Evaluator, Gate, GateConfig,
-    Invariant, InvariantSet, PolicyEngine, PolicySet, SessionState, Verdict,
+    ActionContext, ActionDescriptor, AuditLog, AuditSink, DriftEvaluator,
+    EnvContext, Evaluator, Gate, GateConfig, Invariant, InvariantSet,
+    PolicyEngine, PolicySet, Principal, PrincipalKind, SessionState, Verdict,
 };
-use kavach_http::{HttpGate, HttpMiddlewareConfig, HttpRequest};
-use std::collections::HashMap;
 use std::sync::Arc;
 
-fn build_gate(observe_only: bool) -> (HttpGate, Arc<AuditLog>) {
-    let policy_toml = r#"
-        [[policy]]
-        name = "user_read_anything"
-        effect = "permit"
-        priority = 10
-        conditions = [
-            { identity_kind = "user" },
-            { action = "orders.read" },
-        ]
+const POLICY_TOML: &str = r#"
+[[policy]]
+name = "support_create_refund"
+effect = "permit"
+priority = 10
+conditions = [
+    { identity_role = "support" },
+    { action = "refunds.create" },
+    { param_max = { field = "amount", max = 50000.0 } },
+    { rate_limit = { max = 50, window = "1h" } },
+]
 
-        [[policy]]
-        name = "support_create_refund"
-        effect = "permit"
-        priority = 10
-        conditions = [
-            { identity_role = "support" },
-            { action = "refunds.create" },
-            { param_max = { field = "amount", max = 50000.0 } },
-            { rate_limit = { max = 50, window = "1h" } },
-        ]
+[[policy]]
+name = "admin_delete_business_hours"
+effect = "permit"
+priority = 20
+conditions = [
+    { identity_role = "admin" },
+    { action = "orders.delete" },
+    { time_window = "09:00-18:00" },
+]
+"#;
 
-        [[policy]]
-        name = "admin_delete_business_hours"
-        effect = "permit"
-        priority = 20
-        conditions = [
-            { identity_role = "admin" },
-            { action = "orders.delete" },
-            { time_window = "09:00-18:00" },
-        ]
-    "#;
-
+fn build_gate() -> (Gate, Arc<AuditLog>) {
     let policy_engine = Arc::new(PolicyEngine::new(
-        PolicySet::from_toml(policy_toml).expect("valid policy"),
+        PolicySet::from_toml(POLICY_TOML).expect("valid policy"),
     ));
     let drift = Arc::new(DriftEvaluator::with_defaults());
     let invariants = Arc::new(InvariantSet::new(vec![
@@ -393,87 +383,67 @@ fn build_gate(observe_only: bool) -> (HttpGate, Arc<AuditLog>) {
     let audit = Arc::new(AuditLog::new(1_000));
     let evaluators: Vec<Arc<dyn Evaluator>> = vec![policy_engine, drift, invariants];
 
-    let gate = Gate::new(
-        evaluators,
-        GateConfig { observe_only, ..Default::default() },
-    )
-    .with_audit(audit.clone() as Arc<dyn AuditSink>);
-
-    let http = HttpGate::new(
-        Arc::new(gate),
-        HttpMiddlewareConfig {
-            gate_mutations_only: true,
-            excluded_paths: vec!["/health".into(), "/metrics".into()],
-            ..Default::default()
-        },
-    );
-    (http, audit)
+    let gate = Gate::new(evaluators, GateConfig::default())
+        .with_audit(audit.clone() as Arc<dyn AuditSink>);
+    (gate, audit)
 }
 
-fn request(method: &str, path: &str, principal: &str, roles: &str, body: Option<serde_json::Value>) -> HttpRequest {
-    let mut headers = HashMap::new();
-    headers.insert("X-Principal-Id".into(), principal.into());
-    headers.insert("X-Roles".into(), roles.into());
-    HttpRequest {
-        method: method.into(),
-        path: path.into(),
-        path_params: HashMap::new(),
-        query_params: HashMap::new(),
-        body,
-        headers,
-        remote_ip: Some("10.0.1.50".parse().unwrap()),
-    }
+fn ctx(principal_id: &str, role: &str, action: &str, amount: f64) -> ActionContext {
+    ActionContext::new(
+        Principal {
+            id: principal_id.into(),
+            kind: PrincipalKind::Agent,
+            roles: vec![role.into()],
+            credentials_issued_at: Utc::now(),
+            display_name: None,
+        },
+        ActionDescriptor::new(action)
+            .with_param("amount", serde_json::json!(amount)),
+        SessionState::new(),
+        EnvContext::default(),
+    )
 }
 
 #[tokio::main]
 async fn main() {
-    let (http_gate, audit) = build_gate(false);
-    let session = SessionState::new();
+    let (gate, audit) = build_gate();
 
     // Small refund, permitted.
-    let req = request(
-        "POST", "/api/v1/refunds", "agent_priya", "support",
-        Some(serde_json::json!({ "amount": 2_000.0, "order_id": "ORD-5678" })),
-    );
-    if http_gate.should_gate(&req) {
-        match http_gate.evaluate(&req, &session).await {
-            Verdict::Permit(tok)     => println!("permit token {}", tok.token_id),
-            Verdict::Refuse(r)       => println!("refuse: {r}"),
-            Verdict::Invalidate(s)   => println!("invalidate: {s}"),
-        }
+    match gate.evaluate(&ctx("agent_priya", "support", "refunds.create", 2_000.0)).await {
+        Verdict::Permit(tok) => println!("permit token {}", tok.token_id),
+        Verdict::Refuse(r) => println!("refuse: {r}"),
+        Verdict::Invalidate(s) => println!("invalidate: {s}"),
     }
 
-    // Over-limit, refused by the invariant even though the support policy would permit.
-    let req = request(
-        "POST", "/api/v1/refunds", "agent_priya", "support",
-        Some(serde_json::json!({ "amount": 999_999.0 })),
-    );
-    if http_gate.should_gate(&req) {
-        if let Verdict::Refuse(r) = http_gate.evaluate(&req, &session).await {
-            println!("refused: {r}");
-        }
+    // Over the invariant cap, refused even though the support policy would permit.
+    if let Verdict::Refuse(r) = gate
+        .evaluate(&ctx("agent_priya", "support", "refunds.create", 999_999.0))
+        .await
+    {
+        println!("refused: {r}");
     }
 
     // Audit tail.
     for entry in audit.entries().iter().rev().take(5) {
         println!(
             "[{}] {} -> {} :: {}",
-            entry.verdict.to_uppercase(), entry.principal_id,
-            entry.action_name, entry.verdict_detail,
+            entry.verdict.to_uppercase(),
+            entry.principal_id,
+            entry.action_name,
+            entry.verdict_detail,
         );
     }
 }
 ```
 
-Run with `cargo run --example rust_guide`. The canonical working examples live under `Kavach/kavach-http/examples/` (`http_api.rs`, `axum_layer.rs`, `actix_middleware.rs`).
+Run with `cargo run --example rust_guide`.
 
 ---
 
 ## Next
 
-- [concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md), semantics of Permit / Refuse / Invalidate.
-- [concepts/evaluators.md](../concepts/evaluators.md), the evaluator chain in depth.
-- [guides/http.md](http.md), Axum / Tower / Actix integration.
-- [guides/mcp.md](mcp.md), gating MCP tool calls.
-- [guides/distributed.md](distributed.md), multi-node invalidation broadcast, Redis-backed stores.
-- [reference/api-surface.md](../reference/api-surface.md), full type listing.
+- [../concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md): semantics of Permit / Refuse / Invalidate.
+- [../concepts/evaluators.md](../concepts/evaluators.md): the evaluator chain in depth.
+- [toml-policies.md](toml-policies.md): operator-edited TOML workflow.
+- [distributed.md](distributed.md): multi-node invalidation broadcast, Redis-backed stores.
+- [../reference/api-surface.md](../reference/api-surface.md): full type listing.

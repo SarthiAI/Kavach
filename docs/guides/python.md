@@ -1,8 +1,8 @@
 # Python integration guide
 
-The Python SDK is a thin PyO3 wrapper over the compiled Rust engine. Every `evaluate()` call crosses FFI into `kavach-core`; none of the gate logic runs in Python. This guide covers what lives above that boundary: the idiomatic wrappers, decorators, middleware, and PQ crypto surface exposed from the `kavach` package.
+The Python SDK is a thin PyO3 wrapper over the compiled Rust engine. Every `evaluate()` call crosses FFI into `kavach-core`; none of the gate logic runs in Python. This guide covers what lives above that boundary: the idiomatic wrappers, decorators, and PQ crypto surface exposed from the `kavach` package.
 
-For the Rust surface underneath, see [rust.md](rust.md). For the TypeScript equivalent, see [typescript.md](typescript.md).
+For the Rust surface underneath, see [rust.md](rust.md). For the TypeScript equivalent, see [typescript.md](typescript.md). For the operator-edited TOML workflow, see [toml-policies.md](toml-policies.md).
 
 ---
 
@@ -21,18 +21,22 @@ Wheels are abi3, so a single wheel per platform covers CPython 3.10, 3.11, 3.12,
 ```python
 from kavach import ActionContext, Gate
 
-POLICY = """
-[[policy]]
-name = "agent_small_refunds"
-effect = "permit"
-conditions = [
-    { identity_kind = "agent" },
-    { action = "issue_refund" },
-    { param_max = { field = "amount", max = 1000.0 } },
-]
-"""
+# Policy as a native Python dict. No separate config format to learn.
+POLICY = {
+    "policies": [
+        {
+            "name": "agent_small_refunds",
+            "effect": "permit",
+            "conditions": [
+                {"identity_kind": "agent"},
+                {"action": "issue_refund"},
+                {"param_max": {"field": "amount", "max": 1000.0}},
+            ],
+        },
+    ],
+}
 
-gate = Gate.from_toml(POLICY, invariants=[("hard_cap", "amount", 50_000.0)])
+gate = Gate.from_dict(POLICY, invariants=[("hard_cap", "amount", 50_000.0)])
 
 ctx = ActionContext(
     principal_id="agent-bot",
@@ -48,7 +52,7 @@ else:
     print(f"blocked: [{verdict.code}] {verdict.evaluator}: {verdict.reason}")
 ```
 
-An empty policy string is valid. It default-denies everything, which is useful as a kill-switch.
+An empty policy set is valid. It default-denies everything, which is useful as a kill-switch.
 
 ---
 
@@ -59,14 +63,14 @@ Five factories, all taking the same keyword options. Pick whichever fits how you
 ```python
 from kavach import Gate
 
-gate = Gate.from_toml(toml_string, ...)         # TOML string (operator-edited config)
-gate = Gate.from_file("kavach.toml", ...)        # TOML file on disk
-gate = Gate.from_dict(policy_dict, ...)          # native Python dict
-gate = Gate.from_json_string(json_string, ...)   # JSON string (e.g. wire body)
+gate = Gate.from_dict(policy_dict, ...)          # native Python dict (recommended)
+gate = Gate.from_json_string(json_string, ...)   # JSON string (wire body)
 gate = Gate.from_json_file("kavach.json", ...)   # JSON file on disk
+gate = Gate.from_toml(toml_string, ...)          # operator-edited TOML string
+gate = Gate.from_file("kavach.toml", ...)        # TOML file on disk
 ```
 
-All five share the same condition vocabulary; see [reference/policy-language.md](../reference/policy-language.md) for the full grammar. Typo'd or unknown field names raise a clear `ValueError` in every loader. Example:
+All five share the same condition vocabulary; see [../reference/policy-language.md](../reference/policy-language.md) for the full grammar. Typo'd or unknown field names raise a clear `ValueError` in every loader. Example:
 
 ```python
 gate = Gate.from_dict({
@@ -85,7 +89,7 @@ gate = Gate.from_dict({
 })
 ```
 
-For programmatic policy construction (admin UI submissions, database rows, feature flags), `from_dict` is usually the cleanest path: build the dict however you like, hand it to the gate, no string templating.
+For programmatic policy construction (admin UI submissions, database rows, feature flags), `from_dict` is the cleanest path: build the dict however you like, hand it to the gate, no string templating. For policies operators hand-edit and commit to git, use the TOML loaders; see [toml-policies.md](toml-policies.md).
 
 Keyword arguments:
 
@@ -165,11 +169,9 @@ except Invalidated as e:
 
 ---
 
-## Decorators
+## Decorator: `@guarded`
 
-Two decorators wrap ordinary functions with a gate check. Special `_`-prefixed kwargs become the context; they are stripped before the wrapped function runs.
-
-### `@guarded` for regular functions
+Wraps an ordinary function with a gate check. Special `_`-prefixed kwargs become the context; they are stripped before the wrapped function runs.
 
 ```python
 from kavach import guarded
@@ -191,96 +193,7 @@ result = await issue_refund(
 
 `param_fields` maps gate-side parameter names to function argument names. Only `int` and `float` values are forwarded as params (other types are silently dropped, matching the numeric-only `ActionContext.params` contract).
 
-Both async and sync functions are supported, the decorator returns the matching wrapper shape.
-
-### `@guarded_tool` for MCP handlers
-
-```python
-from kavach import guarded_tool
-
-@guarded_tool(gate, action="issue_refund")
-async def handle_refund(params: dict) -> dict:
-    # Numeric params automatically feed invariant/policy checks.
-    return {"status": "done", "amount": params["amount"]}
-
-await handle_refund(
-    {"order_id": "ORD-123", "amount": 500.0},
-    _principal_id="agent-bot",
-    _principal_kind="agent",
-)
-```
-
----
-
-## MCP middleware
-
-`McpKavachMiddleware` wraps an MCP tool handler with gate checks. All three styles are interchangeable.
-
-```python
-from kavach import McpKavachMiddleware
-
-kv = McpKavachMiddleware(gate)
-
-# Style 1: raise on block.
-kv.check_tool_call(
-    tool_name="issue_refund",
-    params={"amount": 500, "order_id": "ORD-123"},
-    caller_id="agent-bot",
-    caller_kind="agent",
-    session_id="sess-1",
-    ip="10.0.0.1",
-)
-
-# Style 2: return the verdict.
-verdict = kv.evaluate_tool_call(
-    tool_name="issue_refund",
-    params={"amount": 500},
-    caller_id="agent-bot",
-    caller_kind="agent",
-)
-if not verdict.is_permit:
-    return {"error": verdict.reason}
-
-# Style 3: wrap a handler once, reuse everywhere.
-from functools import partial
-
-async def refund_impl(params: dict) -> dict:
-    return {"status": "refunded"}
-
-guarded_refund = partial(
-    kv.check_tool_call,
-    tool_name="issue_refund",
-    caller_id="agent-bot",
-    caller_kind="agent",
-)
-```
-
-Geo kwargs (`current_geo`, `origin_geo`) flow through unchanged, so the tolerant-mode `GeoLocationDrift` evaluator sees them.
-
----
-
-## FastAPI middleware
-
-```python
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from kavach import Gate, HttpKavachMiddleware
-
-app = FastAPI()
-gate = Gate.from_file("kavach.toml")
-kavach_http = HttpKavachMiddleware(gate)
-
-@app.middleware("http")
-async def kavach_gate(request, call_next):
-    verdict = kavach_http.evaluate_fastapi(request)
-    if verdict.is_invalidate:
-        return JSONResponse(status_code=401, content={"error": verdict.reason})
-    if not verdict.is_permit:
-        return JSONResponse(status_code=403, content={"error": verdict.reason})
-    return await call_next(request)
-```
-
-Integrators plug in a GeoIP lookup via the `geo_resolver` argument on `HttpKavachMiddleware`. Explicit `current_geo`/`origin_geo` on `evaluate(...)` always win; the resolver only fires when both are absent.
+Both async and sync functions are supported; the decorator returns the matching wrapper shape.
 
 ---
 
@@ -294,7 +207,7 @@ from kavach import Gate, PermitToken, PqTokenSigner
 signer = PqTokenSigner.generate_hybrid()   # ML-DSA-65 + Ed25519
 # signer = PqTokenSigner.generate_pq_only()  # ML-DSA-65 only
 
-gate = Gate.from_toml(POLICY, token_signer=signer)
+gate = Gate.from_dict(POLICY, token_signer=signer)
 verdict = gate.evaluate(ctx)
 
 if verdict.is_permit:
@@ -379,7 +292,7 @@ Path("directory.json").write_bytes(signed)
 
 dir_signed = PublicKeyDirectory.from_signed_file(
     "directory.json",
-    root_vk=signing_key.public_keys().ml_dsa_verifying_key,
+    root_ml_dsa_verifying_key=signing_key.public_keys().ml_dsa_verifying_key,
 )
 ```
 
@@ -458,17 +371,11 @@ Kavach exposes pluggable stores at both the in-memory tier (useful for tests and
 
 ```python
 from kavach import (
-    ActionContext, Gate,
-    InMemoryInvalidationBroadcaster, InMemorySessionStore,
-    McpKavachMiddleware, spawn_invalidation_listener,
+    Gate, InMemoryInvalidationBroadcaster, spawn_invalidation_listener,
 )
 
 broadcaster = InMemoryInvalidationBroadcaster()
-gate = Gate.from_toml(POLICY, broadcaster=broadcaster)
-
-# McpKavachMiddleware can share a session store so invalidations fan out
-# to every tool call on this node. Defaults to a private InMemorySessionStore.
-mcp = McpKavachMiddleware(gate, session_store=InMemorySessionStore())
+gate = Gate.from_dict(POLICY, broadcaster=broadcaster)
 
 # React to Invalidate verdicts from anywhere in the process.
 handle = spawn_invalidation_listener(
@@ -483,31 +390,32 @@ handle.abort()   # stop the listener on shutdown
 
 ### Multi-replica with Redis
 
+> **Experimental. Not yet thoroughly validated.**
+>
+> The `kavach-redis` crate has Rust-level integration tests, and the Python SDK exposes the three Redis-backed classes, but the consumer-validation harness at `business-tests/` does not yet cover the multi-replica path end to end. Early adopters can wire this up; treat it as a reference until validation lands, tracked in [../roadmap.md](../roadmap.md).
+
 Spin up Redis (`docker run --rm -p 6379:6379 redis:7`) and point every replica at the same URL.
 
 ```python
 from kavach import (
     Gate,
-    RedisRateLimitStore, RedisSessionStore, RedisInvalidationBroadcaster,
-    McpKavachMiddleware, spawn_invalidation_listener,
+    RedisRateLimitStore, RedisInvalidationBroadcaster,
+    spawn_invalidation_listener,
 )
 
 REDIS_URL = "redis://127.0.0.1:6379"
 
 rate_store  = RedisRateLimitStore(REDIS_URL)
-session_store = RedisSessionStore(REDIS_URL)
 broadcaster = RedisInvalidationBroadcaster(REDIS_URL, channel="kavach:invalidation")
 
-gate = Gate.from_toml(
+gate = Gate.from_dict(
     POLICY,
     rate_store=rate_store,
     broadcaster=broadcaster,
 )
 
-mcp = McpKavachMiddleware(gate, session_store=session_store)
-
 # Listener bridges the Redis Pub/Sub channel into your process: one per replica.
-handle = spawn_invalidation_listener(broadcaster, on_invalidation)
+handle = spawn_invalidation_listener(broadcaster, lambda scope: None)
 ```
 
 Semantic notes:
@@ -516,7 +424,7 @@ Semantic notes:
 - **Broadcast failure never downgrades the local verdict.** The local `Invalidate` stands; peers missing the publish pick up the state next time they read the shared session store.
 - **Connect timeout is 5 s.** A bad Redis URL surfaces as `ValueError("redis connect timed out after 5s")` within seconds rather than hanging forever.
 
-For the full multi-node wiring (HTTP layer, session resolvers, the Rust-level reconnect behaviour), see [guides/distributed.md](distributed.md).
+For the full multi-node wiring (session resolvers, Rust-level reconnect behaviour), see [distributed.md](distributed.md).
 
 ---
 
@@ -526,9 +434,7 @@ For the full multi-node wiring (HTTP layer, session resolvers, the Rust-level re
 gate.reload(new_policy_toml)
 ```
 
-Parse errors raise `ValueError`; the previous good set stays in place. Empty TOML is valid and default-denies.
-
-For file-watched reload, wire `watchdog` or `inotify` into a small loop that calls `gate.reload(Path(...).read_text())` on change. The Rust side swaps atomically.
+`reload` accepts a TOML string. Parse errors raise `ValueError`; the previous good set stays in place. Empty TOML is valid and default-denies. For the full reload workflow (including the file-watcher pattern and the empty-TOML kill switch), see [toml-policies.md](toml-policies.md).
 
 ---
 
@@ -546,36 +452,38 @@ from pathlib import Path
 
 from kavach import (
     ActionContext, AuditEntry, DirectoryTokenVerifier, Gate, GeoLocation,
-    HttpKavachMiddleware, KavachKeyPair, McpKavachMiddleware, PermitToken,
-    PqTokenSigner, PublicKeyDirectory, SecureChannel, SignedAuditChain,
-    guarded,
+    KavachKeyPair, PermitToken, PqTokenSigner, PublicKeyDirectory,
+    SecureChannel, SignedAuditChain, guarded,
 )
 from kavach import Invalidated, Refused
 
 
-POLICY = """
-[[policy]]
-name = "support_small_refunds"
-effect = "permit"
-conditions = [
-    { identity_role = "support" },
-    { action = "issue_refund" },
-    { param_max = { field = "amount", max = 5000.0 } },
-]
-
-[[policy]]
-name = "allow_fetch_report"
-effect = "permit"
-conditions = [
-    { action = "fetch_report" },
-]
-"""
+POLICY = {
+    "policies": [
+        {
+            "name": "support_small_refunds",
+            "effect": "permit",
+            "conditions": [
+                {"identity_role": "support"},
+                {"action": "issue_refund"},
+                {"param_max": {"field": "amount", "max": 5000.0}},
+            ],
+        },
+        {
+            "name": "allow_fetch_report",
+            "effect": "permit",
+            "conditions": [
+                {"action": "fetch_report"},
+            ],
+        },
+    ],
+}
 
 
 async def main() -> None:
     # 1. Signed gate.
     signer = PqTokenSigner.generate_hybrid()
-    gate = Gate.from_toml(
+    gate = Gate.from_dict(
         POLICY,
         invariants=[("hard_cap", "amount", 10_000.0)],
         token_signer=signer,
@@ -599,7 +507,7 @@ async def main() -> None:
         action_name=pt.action_name,
     ), pt.signature)
 
-    # 3. Invariant override, policy would permit, but invariant caps amount.
+    # 3. Invariant override: policy would permit, but invariant caps amount.
     big = ActionContext(
         principal_id="agent-alice", principal_kind="agent",
         action_name="issue_refund", roles=["support"],
@@ -628,19 +536,7 @@ async def main() -> None:
     except Refused as e:
         print("decorator blocked:", e)
 
-    # 5. MCP middleware.
-    kv = McpKavachMiddleware(gate)
-    try:
-        kv.check_tool_call(
-            tool_name="delete_customer",
-            params={"customer_id": "c1"},
-            caller_id="agent-alice",
-            caller_kind="agent",
-        )
-    except Refused as e:
-        print("mcp blocked (default deny):", e)
-
-    # 6. Geo drift plumbing.
+    # 5. Geo drift plumbing.
     blr = GeoLocation("IN", city="Bangalore", latitude=12.97, longitude=77.59)
     chn = GeoLocation("IN", city="Chennai",   latitude=13.08, longitude=80.27)
     v_geo = gate.evaluate(ActionContext(
@@ -650,7 +546,7 @@ async def main() -> None:
     ))
     print("tolerant geo verdict:", "permit" if v_geo.is_permit else "blocked")
 
-    # 7. Signed audit chain.
+    # 6. Signed audit chain.
     kp = KavachKeyPair.generate()
     chain = SignedAuditChain(kp, hybrid=True)
     chain.append(AuditEntry("agent-alice", "issue_refund", "permit", "token=abc"))
@@ -659,15 +555,14 @@ async def main() -> None:
     blob = chain.export_jsonl()
     SignedAuditChain.verify_jsonl(blob, kp.public_keys())
 
-    # 8. Directory + DirectoryTokenVerifier.
+    # 7. Directory + DirectoryTokenVerifier.
     root = KavachKeyPair.generate()
     signed_manifest = root.build_signed_manifest([kp.public_keys()])
     Path("/tmp/kavach-directory.json").write_bytes(signed_manifest)
     directory = PublicKeyDirectory.from_signed_file(
         "/tmp/kavach-directory.json",
-        root_vk=root.public_keys().ml_dsa_verifying_key,
+        root_ml_dsa_verifying_key=root.public_keys().ml_dsa_verifying_key,
     )
-    # Use the signer built from `kp` to produce a token the directory can vouch for.
     svc_signer = PqTokenSigner.from_keypair_hybrid(kp)
     tok = PermitToken(
         token_id=str(uuid.uuid4()),
@@ -681,7 +576,7 @@ async def main() -> None:
     verifier.verify(tok, sig)
     print("directory-backed verify ok")
 
-    # 9. Secure channel.
+    # 8. Secure channel.
     alice = KavachKeyPair.generate()
     bob   = KavachKeyPair.generate()
     alice_ch = SecureChannel(alice, bob.public_keys())
@@ -691,11 +586,12 @@ async def main() -> None:
     assert plaintext == b"hello bob"
     print("secure channel roundtrip ok")
 
-    # 10. Hot reload.
+    # 9. Hot reload.
     gate.reload("")                    # default-deny everything
     assert gate.evaluate(ctx).is_refuse
-    gate.reload(POLICY)                # back to permit
-    assert gate.evaluate(ctx).is_permit
+    # Re-hydrate back into the full policy set from the dict form.
+    gate2 = Gate.from_dict(POLICY, invariants=[("hard_cap", "amount", 10_000.0)])
+    assert gate2.evaluate(ctx).is_permit
     print("reload roundtrip ok")
 
 
@@ -709,8 +605,9 @@ For a multi-service runnable example (agent + payment service, 15 scenarios), se
 
 ## Next
 
-- [concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md), Permit / Refuse / Invalidate semantics.
-- [concepts/post-quantum.md](../concepts/post-quantum.md), what hybrid means, and why.
-- [concepts/audit.md](../concepts/audit.md), SignedAuditChain internals.
-- [guides/distributed.md](distributed.md), multi-node deployments.
-- [reference/policy-language.md](../reference/policy-language.md), full condition reference.
+- [../concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md): Permit / Refuse / Invalidate semantics.
+- [../concepts/post-quantum.md](../concepts/post-quantum.md): what hybrid means, and why.
+- [../concepts/audit.md](../concepts/audit.md): SignedAuditChain internals.
+- [toml-policies.md](toml-policies.md): operator-edited TOML workflow.
+- [distributed.md](distributed.md): multi-node deployments.
+- [../reference/policy-language.md](../reference/policy-language.md): full condition reference.

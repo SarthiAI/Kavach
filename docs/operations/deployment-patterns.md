@@ -27,7 +27,7 @@ One process, one `Gate`, all state in memory. Simplest thing that works.
           ┌─────────────────────────────────────┐
           │             host process             │
           │                                      │
-          │   HTTP/MCP handler                   │
+          │   request handler                    │
           │         │                            │
           │         ▼                            │
           │   ┌───────────┐                      │
@@ -80,11 +80,15 @@ What you give up:
 - Session invalidation is local-only. A session killed on node A is still live on node B.
 - Losing the process loses the rate-limit counters and any in-memory audit buffer. Persist the audit chain to disk if you need forensics.
 
-Use single-node when you have exactly one process (MCP server on one host, dev box, CI, a small control-plane service), or when "best-effort, per-process" rate limits and invalidations are what you actually want.
+Use single-node when you have exactly one process (dev box, CI, a small control-plane service, a single-pod deployment), or when "best-effort, per-process" rate limits and invalidations are what you actually want.
 
 ---
 
 ## Pattern 2: Multi-node with shared Redis
+
+> **Experimental. Not yet thoroughly validated.**
+>
+> The `kavach-redis` crate has Rust-level integration tests (run with `TEST_REDIS_URL=redis://... cargo test -p kavach-redis`), but the consumer-validation harness at `business-tests/` does not yet cover the full multi-replica wiring shown below. Early adopters can wire this up today; the code paths compile and match the design intent, but treat this pattern as a reference rather than a production guarantee. Thorough validation is tracked in the [roadmap](../roadmap.md).
 
 One Redis, N application processes. Every process runs its own `Gate`; they share rate-limit state, session state, and invalidation fan-out through Redis.
 
@@ -190,7 +194,7 @@ Three directory backends ship in `kavach-pq`:
 
 - `InMemoryPublicKeyDirectory`: populated in code. Tests and deployments that build the directory at startup.
 - `FilePublicKeyDirectory`: loads a signed manifest from disk. Good fit when a shared volume (NFS, object store with FUSE, baked-into-image) distributes the manifest. Call `reload()` to pick up a new file.
-- `HttpPublicKeyDirectory` (`http_directory.rs`): fetches a signed manifest over HTTP with ETag caching. `If-None-Match` keeps warm-cache refreshes at zero-body cost; on HTTP failure with a warm cache, the verifier serves stale and logs a warning (on a cold cache, it fails closed).
+- `HttpPublicKeyDirectory` (`http_directory.rs`) *(experimental)*: fetches a signed manifest over HTTP with ETag caching. The Rust-level unit tests pass, but the consumer-validation harness does not yet exercise this path end to end. Treat as a reference until validation lands (see [roadmap.md](../roadmap.md)). `If-None-Match` keeps warm-cache refreshes at zero-body cost; on HTTP failure with a warm cache, the verifier serves stale and logs a warning (on a cold cache, it fails closed).
 
 Signed manifests are always verified against a pinned root ML-DSA-65 public key at load time. See [concepts/key-management.md](../concepts/key-management.md).
 
@@ -245,8 +249,6 @@ The code path (see [kavach-core/src/gate.rs](../../kavach-core/src/gate.rs), `ev
 2. If the real verdict is not `Permit`, log at `info` level: `"observe-only: would have blocked this action"`.
 3. Issue a fresh `Permit` and return it.
 
-The HTTP integration respects this flag since P1.7: `HttpGate` dispatches to `evaluate_observe_only` when `config.observe_only` is set, so you do not need a separate middleware for the observation phase.
-
 Rollout sequence that actually works in practice:
 
 1. Week 1: deploy with `observe_only = true`. Tracing goes to your normal log stack. Count `"would have blocked"` lines per policy, per endpoint, per principal. See [operations/observability.md](observability.md).
@@ -273,6 +275,6 @@ Stores:
 - `InMemorySessionStore`: hash-map.
 - `RedisSessionStore`: one round-trip per `get` / `put`.
 
-Signing adds time on `Permit` only (the signer never runs on `Refuse` or `Invalidate`). An ML-DSA-65 signature plus Ed25519 in hybrid mode is on the order of a few milliseconds per signed permit on modern hardware. If every request is gated and every permit is signed, this is your p99 floor. If you gate mutations only (see `HttpMiddlewareConfig::gate_mutations_only`), reads pass through without any signing cost.
+Signing adds time on `Permit` only (the signer never runs on `Refuse` or `Invalidate`). An ML-DSA-65 signature plus Ed25519 in hybrid mode is on the order of a few milliseconds per signed permit on modern hardware. If every request is gated and every permit is signed, this is your p99 floor. If you gate only the write / mutation paths (skip pure reads at the integration layer), reads pass through without any signing cost.
 
 The audit chain writes happen out of band via `AuditSink::record`, behind the verdict path. Pick an implementation whose durability matches your forensics budget: in-memory is fine for reconstruction within a process lifetime; JSONL-on-disk or a `SignedAuditChain` exported periodically is what you want for real incident response.

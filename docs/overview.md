@@ -2,19 +2,19 @@
 
 ## What Kavach is
 
-Kavach is a library that separates *possession of credentials* from *permission to act*. Every action your system is about to take (an API call, an MCP tool invocation, a database write, an LLM function call) passes through a gate. The gate evaluates the action in context and returns one of three verdicts: `Permit`, `Refuse`, or `Invalidate`. The action cannot run unless the gate produced a `Permit`.
+Kavach is a library that separates *possession of credentials* from *permission to act*. Every action your system is about to take (an API call, a database write, an LLM function call, an agent tool invocation) passes through a gate. The gate evaluates the action in context and returns one of three verdicts: `Permit`, `Refuse`, or `Invalidate`. The action cannot run unless the gate produced a `Permit`.
 
 In Rust, the type system enforces this. The only type that can be executed is `Guarded<A>`, and `Guarded<A>` has no public constructor: the sole way to build one is to hand `Gate::guard` an action and have every evaluator permit. Code that forgets the gate does not compile. The Python and Node SDKs preserve the same contract at runtime: a `Verdict` only becomes a `Permit` when every evaluator agreed, and `Gate.check` raises `Refused` or `Invalidated` if not.
 
-Kavach ships in seven crates:
+Kavach ships in five documented crates:
 
 - `kavach-core`, the gate, evaluators, policy engine, drift detection, invariants.
 - `kavach-pq`, post-quantum crypto (ML-DSA-65, ML-KEM-768, Ed25519, X25519, ChaCha20-Poly1305), signed permit tokens, signed audit chains, secure channel.
-- `kavach-http`, Axum / Tower middleware and an Actix adapter.
-- `kavach-mcp`, MCP tool-call gating.
 - `kavach-py`, the Python SDK (PyO3).
 - `kavach-node`, the TypeScript SDK (napi-rs).
-- `kavach-redis`, Redis-backed stores for rate limits, sessions, and cross-node invalidation broadcast.
+- `kavach-redis` *(experimental)*, Redis-backed stores for rate limits, sessions, and cross-node invalidation broadcast. Rust-level integration tests pass; the SDK-consumer validation harness does not yet cover the multi-replica story end to end.
+
+What is consumer-validated today: the Python SDK and the Node SDK, through the `business-tests/` catalogue (Python) and the Node smoke suite. Everything else in the workspace compiles and has its own Rust-level tests, but treat anything outside those two SDKs as an earlier-adopter surface. Two additional crates (`kavach-http`, `kavach-mcp`) live in the workspace and are published, but are held as experimental until their validation lands. See [roadmap.md](roadmap.md).
 
 ## The problem
 
@@ -58,10 +58,10 @@ See [concepts/post-quantum.md](concepts/post-quantum.md), [concepts/audit.md](co
 Reach for Kavach when:
 
 - You are giving an AI agent the ability to call tools or write to downstream systems.
-- You are building an MCP server or tool server that fronts sensitive operations (refunds, deploys, data exports, customer-facing writes).
+- You front sensitive operations (refunds, deploys, data exports, customer-facing writes) from a Python service, a Node service, or a Rust service, and need a gate that any of them can embed.
 - You operate distributed services that need cryptographically verifiable permits at the boundary between services.
 - You need a tamper-evident audit trail that survives the post-quantum transition.
-- You want compile-time guarantees that a permission check cannot be skipped on a code path.
+- You want compile-time guarantees (when embedding in Rust) that a permission check cannot be skipped on a code path.
 
 ## When not to use Kavach
 

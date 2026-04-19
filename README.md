@@ -200,12 +200,12 @@ Policies can be loaded in three ways: from a TOML string (operator-edited config
 
 ## What you can build with it
 
-- **AI agent tool gating.** Give an LLM tool access; Kavach guards every tool call. A prompt-injected agent cannot escalate beyond what policy permits.
-- **Refund, payment, and admin APIs** with per-role caps plus hard compliance invariants that a misconfigured policy cannot bypass.
+- **AI agent tool gating.** Give an LLM tool access; Kavach guards every action before it runs. A prompt-injected agent cannot escalate beyond what policy permits.
+- **Refund, payment, and admin workflows** with per-role caps plus hard compliance invariants that a misconfigured policy cannot bypass.
 - **Multi-tenant SaaS.** Each tenant gets a different policy set, hot-reloadable, default-deny.
 - **Cross-service authorization.** Node A issues a signed permit. Node B verifies independently, no shared secrets.
 - **Tamper-evident audit logs** for SOC 2, ISO 27001, financial compliance. A regulator runs `verify_jsonl(blob, root_public_key)` and gets a cryptographic yes or no.
-- **Incident-grade kill-switch.** Ship an empty policy TOML, every action past that point is refused within 100 ms. Tested, not hypothetical.
+- **Incident-grade kill-switch.** Ship an empty policy set, every action past that point is refused within 100 ms. Tested, not hypothetical.
 
 ## Get started
 
@@ -213,12 +213,11 @@ Policies can be loaded in three ways: from a TOML string (operator-edited config
 |--------------------|---------|-------|
 | **Python** | `pip install kavach` (one abi3 wheel per platform, covers 3.10+) | [docs/guides/python.md](./docs/guides/python.md) |
 | **TypeScript / Node** | `npm install kavach` (Node 20+) | [docs/guides/typescript.md](./docs/guides/typescript.md) |
-| **MCP tool gating** | bundled in both SDKs (`McpKavachMiddleware`) | [docs/guides/mcp.md](./docs/guides/mcp.md) |
-| **HTTP middleware** | bundled in the Python SDK (FastAPI) and Node SDK (Express, Fastify); also `kavach-http` for Rust (Axum / Tower / Actix) | [docs/guides/http.md](./docs/guides/http.md) |
-| **Multi-node (Redis)** | `RedisRateLimitStore` / `RedisSessionStore` / `RedisInvalidationBroadcaster` exposed from the Python SDK; Rust via `kavach-redis` | [docs/guides/distributed.md](./docs/guides/distributed.md) |
 | **Rust (embed in-process)** | `kavach-core = "0.1"` in your `Cargo.toml` | [docs/guides/rust.md](./docs/guides/rust.md) |
+| **Multi-node (Redis)** *(experimental)* | `RedisRateLimitStore` / `RedisSessionStore` / `RedisInvalidationBroadcaster` from the Python SDK; Rust via `kavach-redis`. Rust-level integration tests pass; end-to-end validation pending. | [docs/guides/distributed.md](./docs/guides/distributed.md) |
+| **Operator-edited TOML** | the hand-edited policy file workflow for ops-owned configs | [docs/guides/toml-policies.md](./docs/guides/toml-policies.md) |
 
-Or start with the [five-minute quickstart](./docs/quickstart.md).
+Or start with the [five-minute quickstart](./docs/quickstart.md). The full documentation lives under [docs/](./docs/README.md). Upcoming integrations (native HTTP middleware, MCP tool gating) are tracked in [docs/roadmap.md](./docs/roadmap.md).
 
 ## How it works, a layer deeper
 
@@ -239,15 +238,15 @@ For multi-node deployments, pluggable `RateLimitStore`, `SessionStore`, and `Inv
 .
 ├── kavach-core/      Gate, verdicts, evaluators, traits. The brain.
 ├── kavach-pq/        Post-quantum crypto. Signatures, encryption, audit chain, secure channel.
-├── kavach-http/      Tower Layer, Actix adapter, framework-agnostic HttpGate.
-├── kavach-mcp/       Model Context Protocol tool gating (Rust).
 ├── kavach-py/        Python SDK via PyO3. Ships as abi3 wheels.
 ├── kavach-node/      Node / TypeScript SDK via napi-rs.
-├── kavach-redis/     Redis-backed distributed stores and invalidation broadcaster.
+├── kavach-redis/     Redis-backed distributed stores and invalidation broadcaster. (experimental)
 ├── docs/             Full documentation, organized by concept, guide, operations, reference.
 ├── examples/         Reference policy files.
 └── e2e-tests/        End-to-end harnesses. 21 realistic scenarios, including a wire-trace runner.
 ```
+
+Two additional crates (`kavach-http`, `kavach-mcp`) live in the workspace and are published on crates.io, but are held as experimental until the validation harness covers them. See [docs/roadmap.md](./docs/roadmap.md) for the sequencing.
 
 ## Project status
 
@@ -263,10 +262,11 @@ For multi-node deployments, pluggable `RateLimitStore`, `SessionStore`, and `Inv
 Full docs live in [docs/](./docs/README.md). Starting points:
 
 - **New to Kavach?** [docs/overview.md](./docs/overview.md), then [docs/quickstart.md](./docs/quickstart.md).
-- **Writing policies?** [docs/concepts/policies.md](./docs/concepts/policies.md), complete grammar at [docs/reference/policy-language.md](./docs/reference/policy-language.md).
-- **Integrating with a framework?** [docs/guides/](./docs/guides/) has one file per runtime.
+- **Writing policies?** [docs/concepts/policies.md](./docs/concepts/policies.md), complete grammar at [docs/reference/policy-language.md](./docs/reference/policy-language.md), operator-edited TOML at [docs/guides/toml-policies.md](./docs/guides/toml-policies.md).
+- **Per-language guides.** [docs/guides/rust.md](./docs/guides/rust.md), [docs/guides/python.md](./docs/guides/python.md), [docs/guides/typescript.md](./docs/guides/typescript.md).
 - **Running in production?** [docs/operations/](./docs/operations/) covers deployment patterns, observability, and incident response playbooks.
 - **Curious about the crypto?** [docs/concepts/post-quantum.md](./docs/concepts/post-quantum.md) and [docs/concepts/audit.md](./docs/concepts/audit.md).
+- **What is coming next?** [docs/roadmap.md](./docs/roadmap.md).
 
 ## Security
 

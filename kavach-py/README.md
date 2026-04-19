@@ -25,18 +25,22 @@ Wheels are published as `abi3`. A single wheel per platform covers CPython 3.10,
 ```python
 from kavach import ActionContext, Gate
 
-POLICY = """
-[[policy]]
-name = "agent_small_refunds"
-effect = "permit"
-conditions = [
-    { identity_kind = "agent" },
-    { action = "issue_refund" },
-    { param_max = { field = "amount", max = 1000.0 } },
-]
-"""
+# Policy as a native Python dict. No separate config format to learn.
+POLICY = {
+    "policies": [
+        {
+            "name": "agent_small_refunds",
+            "effect": "permit",
+            "conditions": [
+                {"identity_kind": "agent"},
+                {"action": "issue_refund"},
+                {"param_max": {"field": "amount", "max": 1000.0}},
+            ],
+        },
+    ],
+}
 
-gate = Gate.from_toml(
+gate = Gate.from_dict(
     POLICY,
     invariants=[("hard_cap", "amount", 50_000.0)],
 )
@@ -50,64 +54,33 @@ ctx = ActionContext(
 verdict = gate.evaluate(ctx)
 
 if verdict.is_permit:
-    process_refund()
+    print("permit", verdict.token_id)
 else:
     print(f"blocked: [{verdict.code}] {verdict.evaluator}: {verdict.reason}")
 ```
 
 A policy set with no matching permit Refuses by default. There is no implicit allow.
 
-### Three ways to load a policy
+### Loading a policy
 
-The same vocabulary works in TOML, a Python dict, or a JSON file. Pick whichever fits your workflow.
+The recommended surface for Python is a native dict (admin UI submissions, database rows, feature flags):
 
 ```python
-gate = Gate.from_toml(toml_string)             # operator-edited TOML
-gate = Gate.from_file("kavach.toml")            # TOML file on disk
-gate = Gate.from_dict(policy_dict)              # native dict (admin UI, DB row, etc.)
+gate = Gate.from_dict(policy_dict)              # native dict (recommended)
 gate = Gate.from_json_string(json_string)       # JSON over the wire
 gate = Gate.from_json_file("kavach.json")       # JSON file on disk
 ```
 
-Typo'd field names (`{"idnetity_kind": "agent"}`) raise `ValueError` in every loader instead of being silently dropped, so a misspelled condition cannot quietly weaken a policy.
+For operator-owned config that lives in git and is hand-edited, use TOML:
+
+```python
+gate = Gate.from_toml(toml_string)              # operator-edited TOML
+gate = Gate.from_file("kavach.toml")            # TOML file on disk
+```
+
+Typo'd field names (`{"idnetity_kind": "agent"}`) raise `ValueError` in every loader instead of being silently dropped, so a misspelled condition cannot quietly weaken a policy. The full TOML workflow (rendered in Rust, Python, and Node) lives at [docs/guides/toml-policies.md](https://github.com/SarthiAI/Kavach/blob/main/docs/guides/toml-policies.md).
 
 ---
-
-## MCP tool gating
-
-```python
-from kavach import Gate, McpKavachMiddleware
-
-gate = Gate.from_file("kavach.toml")
-kavach = McpKavachMiddleware(gate)
-
-# In your MCP tool handler:
-kavach.check_tool_call(
-    tool_name="issue_refund",
-    params={"amount": 500, "order_id": "ORD-123"},
-    caller_id="agent-bot",
-    caller_kind="agent",
-)
-# Raises kavach.Refused if blocked, kavach.Invalidated if session revoked.
-```
-
-## FastAPI middleware
-
-```python
-from fastapi import FastAPI
-from kavach import Gate, HttpKavachMiddleware
-
-app = FastAPI()
-gate = Gate.from_file("kavach.toml")
-kavach_http = HttpKavachMiddleware(gate)
-
-@app.middleware("http")
-async def kavach_gate(request, call_next):
-    verdict = kavach_http.evaluate_fastapi(request)
-    if not verdict.is_permit:
-        return JSONResponse(status_code=403, content={"error": verdict.reason})
-    return await call_next(request)
-```
 
 ## Decorator
 
@@ -116,13 +89,15 @@ from kavach import guarded
 
 @guarded(gate, action="issue_refund", param_fields={"amount": "amount"})
 async def issue_refund(order_id: str, amount: float):
-    return process_refund(order_id, amount)
+    return {"status": "refunded", "order_id": order_id, "amount": amount}
 
 result = await issue_refund(
     "ORD-123", 500.0,
     _principal_id="bot", _principal_kind="agent",
 )
 ```
+
+Both async and sync functions are supported; the decorator returns the matching wrapper shape. Only numeric parameters are forwarded to the gate (the policy and invariant evaluators operate on numeric thresholds).
 
 ---
 
@@ -136,7 +111,7 @@ When a `PqTokenSigner` is attached to a gate, every Permit verdict carries an ML
 from kavach import Gate, PqTokenSigner, PermitToken
 
 signer = PqTokenSigner.generate_hybrid()
-gate = Gate.from_toml(POLICY, token_signer=signer)
+gate = Gate.from_dict(POLICY, token_signer=signer)
 
 verdict = gate.evaluate(...)
 if verdict.is_permit:
@@ -215,7 +190,7 @@ Path("directory.json").write_bytes(manifest)
 
 directory = PublicKeyDirectory.from_signed_file(
     "directory.json",
-    root_vk=signing_key.public_keys().ml_dsa_verifying_key,
+    root_ml_dsa_verifying_key=signing_key.public_keys().ml_dsa_verifying_key,
 )
 
 verifier = DirectoryTokenVerifier(directory, hybrid=True)
@@ -231,7 +206,7 @@ Same-country IP hops become Warnings instead of Violations when you provide lat/
 ```python
 from kavach import ActionContext, GeoLocation
 
-gate = Gate.from_toml(POLICY, geo_drift_max_km=500.0)
+gate = Gate.from_dict(POLICY, geo_drift_max_km=500.0)
 
 verdict = gate.evaluate(ActionContext(
     principal_id="u", principal_kind="user",
@@ -247,34 +222,36 @@ Missing geo with a threshold set still **fails closed**. The SDK does not silent
 
 ### Policy hot reload
 
+`gate.reload(...)` accepts a TOML string; it raises `ValueError` on parse error and leaves the previous good set in place. See [docs/guides/toml-policies.md](https://github.com/SarthiAI/Kavach/blob/main/docs/guides/toml-policies.md) for the full reload workflow (including the file-watcher pattern and the empty-TOML kill switch).
+
 ```python
 gate.reload(new_policy_toml)   # parse error raises, previous set preserved
 ```
 
-### Multi-replica (Redis)
+### Multi-replica (Redis) *(experimental)*
 
-Rate limits, sessions, and session invalidation can all move to Redis so every replica agrees:
+> The Rust-level integration tests for `kavach-redis` pass, and the Python SDK exposes `RedisRateLimitStore` / `RedisSessionStore` / `RedisInvalidationBroadcaster` as classes, but the end-to-end multi-replica story has not yet been validated through the consumer-test harness. Early adopters can wire this up; treat it as a reference rather than a production guarantee. Thorough validation is tracked in the [project roadmap](https://github.com/SarthiAI/Kavach/blob/main/docs/roadmap.md).
+
+Rate limits and invalidation broadcast move to Redis so every replica agrees:
 
 ```python
 from kavach import (
-    Gate, RedisRateLimitStore, RedisSessionStore, RedisInvalidationBroadcaster,
-    McpKavachMiddleware, spawn_invalidation_listener,
+    Gate, RedisRateLimitStore, RedisInvalidationBroadcaster,
+    spawn_invalidation_listener,
 )
 
 REDIS_URL = "redis://127.0.0.1:6379"
 
 rate_store = RedisRateLimitStore(REDIS_URL)
-session_store = RedisSessionStore(REDIS_URL)
 broadcaster = RedisInvalidationBroadcaster(REDIS_URL, channel="kavach:invalidation")
 
-gate = Gate.from_toml(POLICY, rate_store=rate_store, broadcaster=broadcaster)
-mcp = McpKavachMiddleware(gate, session_store=session_store)
+gate = Gate.from_dict(POLICY, rate_store=rate_store, broadcaster=broadcaster)
 
-handle = spawn_invalidation_listener(broadcaster, on_invalidation)
+handle = spawn_invalidation_listener(broadcaster, lambda scope: None)
 # handle.abort() on shutdown
 ```
 
-Redis outages fail closed: a dropped `record` refuses the action; a dropped `count` collapses the rate-limit condition to default-deny.
+Redis outages fail closed: a dropped `record` refuses the action; a dropped `count` collapses the rate-limit condition to default-deny. Full wiring lives in [docs/guides/distributed.md](https://github.com/SarthiAI/Kavach/blob/main/docs/guides/distributed.md).
 
 ---
 
@@ -283,7 +260,7 @@ Redis outages fail closed: a dropped `record` refuses the action; a dropped `cou
 Roll out incrementally: log verdicts without blocking.
 
 ```python
-gate = Gate.from_file("kavach.toml", observe_only=True)
+gate = Gate.from_dict(POLICY, observe_only=True)
 ```
 
 ---
@@ -292,7 +269,7 @@ gate = Gate.from_file("kavach.toml", observe_only=True)
 
 Every `evaluate()` call crosses FFI into compiled Rust. The Python layer is pure wrappers. The engine implements:
 
-- **Policy:** TOML rules with conditions (`identity_kind`, `action`, `param_max`, `rate_limit`, `time_window` with optional timezone, etc.).
+- **Policy:** a small, fixed condition vocabulary (`identity_kind`, `action`, `param_max`, `rate_limit`, `time_window` with optional timezone, etc.) expressed as a Python dict, JSON, or operator-edited TOML.
 - **Drift detectors:** IP / geo, session age, device, behavior.
 - **Invariants:** hard per-action limits that cannot be overridden by policy.
 - **Post-quantum crypto:** ML-DSA-65, ML-KEM-768, Ed25519, X25519, ChaCha20-Poly1305.

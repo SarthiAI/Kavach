@@ -4,6 +4,8 @@ A navigable index of the public types Kavach exposes, organized per crate and pe
 
 Every path in this document is relative to the repo root, so `[Gate](../../kavach-core/src/gate.rs)` resolves from this file's location.
 
+This index covers the documented surface: `kavach-core`, `kavach-pq`, `kavach-py`, `kavach-node`, and `kavach-redis`. Two additional crates (`kavach-http`, `kavach-mcp`) live in the workspace and are held as experimental until their validation harness lands; see [../roadmap.md](../roadmap.md).
+
 ---
 
 ## `kavach-core`
@@ -175,44 +177,6 @@ Re-exported from [kavach-pq/src/lib.rs](../../kavach-pq/src/lib.rs). Post-quantu
 
 ---
 
-## `kavach-http`
-
-Re-exported from [kavach-http/src/lib.rs](../../kavach-http/src/lib.rs). Framework-agnostic HTTP middleware plus Tower and Actix adapters.
-
-| Type                                                                    | Purpose                                                                                                |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| [`HttpRequest`](../../kavach-http/src/lib.rs)                           | Framework-neutral request representation: method, path, params, body, headers, remote IP.              |
-| [`HttpMiddlewareConfig`](../../kavach-http/src/lib.rs)                  | Configuration: `gate_mutations_only`, `excluded_paths`, `principal_header`, `roles_header`.            |
-| [`HttpGate`](../../kavach-http/src/lib.rs)                              | Wraps a `kavach_core::Gate` with HTTP translation; honors `GateConfig::observe_only` on every call.    |
-| [`KavachLayer`](../../kavach-http/src/tower_layer.rs) (feature = "tower") | Tower `Layer` that gates each inbound `http::Request<B>`; default body-buffering cap 64 KiB.          |
-| [`KavachService`](../../kavach-http/src/tower_layer.rs) (feature = "tower") | Tower `Service` produced by `KavachLayer`; response body is `Either<InnerBody, Full<Bytes>>`.        |
-| [`KavachBody`](../../kavach-http/src/tower_layer.rs) (feature = "tower") | Alias `Full<Bytes>`; the body Kavach emits on Refuse / Invalidate.                                    |
-| [`LayerResponseBody<B>`](../../kavach-http/src/tower_layer.rs) (feature = "tower") | Alias `Either<B, KavachBody>`; what downstream services see.                                |
-| [`KavachFuture`](../../kavach-http/src/tower_layer.rs) (feature = "tower") | Pin-projected future returned by `KavachService::call`.                                              |
-| [`KavachActixMiddleware`](../../kavach-http/src/actix_middleware.rs) (feature = "actix") | Actix `Transform` wrapping `HttpGate`; `App::wrap(...)`-compatible.                     |
-| [`KavachActixService`](../../kavach-http/src/actix_middleware.rs) (feature = "actix") | Actix `Service` produced by `KavachActixMiddleware`.                                       |
-
-Response mapping for both Tower and Actix integrations: Permit passes through, Refuse returns 403 (or 429 on `RefuseCode::RateLimitExceeded`, 401 on `RefuseCode::IdentityFailed` / `SessionInvalid`), Invalidate returns 401.
-
----
-
-## `kavach-mcp`
-
-Re-exported from [kavach-mcp/src/lib.rs](../../kavach-mcp/src/lib.rs). MCP tool-call gating.
-
-| Type                                                                    | Purpose                                                                                                |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| [`McpKavachLayer`](../../kavach-mcp/src/lib.rs)                         | High-level MCP middleware that bundles a `Gate` and an `McpSessionManager`.                            |
-| [`McpSessionManager`](../../kavach-mcp/src/lib.rs)                      | Session manager backed by a pluggable `SessionStore`; all methods are async.                           |
-| [`McpToolRequest`](../../kavach-mcp/src/lib.rs)                         | Incoming MCP tool call: tool name, params, caller, session id, metadata.                               |
-| [`McpCaller`](../../kavach-mcp/src/lib.rs)                              | Caller identity: id, kind, roles, IP, client name.                                                      |
-| [`McpCallerKind`](../../kavach-mcp/src/lib.rs)                          | `Agent`, `User`, `Service`; converts into `PrincipalKind`.                                              |
-| [`GuardedResult`](../../kavach-mcp/src/lib.rs)                          | Tool-call outcome: `Success`, `Refused`, `Invalidated`, `Error`.                                        |
-| [`evaluate_tool_call`](../../kavach-mcp/src/lib.rs)                     | Primary integration function: translates `McpToolRequest` + `SessionState` to `Verdict`.                |
-| [`to_action_context`](../../kavach-mcp/src/lib.rs)                      | Thin MCP-to-core translation helper.                                                                    |
-
----
-
 ## `kavach-py`
 
 Python package entry point is [kavach-py/python/kavach/\_\_init\_\_.py](../../kavach-py/python/kavach/__init__.py). Everything compiled lives in the `_kavach_engine` native module; these are the user-facing symbols.
@@ -233,8 +197,8 @@ Python package entry point is [kavach-py/python/kavach/\_\_init\_\_.py](../../ka
 | [`SecureChannel`](../../kavach-py/src/lib.rs)                                             | PQ secure channel; exposes `send_signed`/`receive_signed`, `send_data`/`receive_data` bytes flow.       |
 | [`GeoLocation`](../../kavach-py/src/lib.rs)                                               | Pyclass; `country_code` required, `latitude`/`longitude` unlock tolerant `GeoLocationDrift`.            |
 | [`DeviceFingerprint`](../../kavach-py/src/lib.rs)                                         | Pyclass for the device-drift detector; opaque fingerprint hash plus optional user-agent / platform.     |
-| [`InvalidationScope`](../../kavach-py/src/lib.rs)                                         | Pyclass surfaced to listener callbacks and MCP invalidate helpers; `target`, `reason`, `evaluator`.     |
-| [`InMemorySessionStore`](../../kavach-py/src/lib.rs)                                      | In-process session store; usable directly or passed to `McpKavachMiddleware(..., session_store=...)`.   |
+| [`InvalidationScope`](../../kavach-py/src/lib.rs)                                         | Pyclass surfaced to listener callbacks; carries `target`, `reason`, `evaluator`.                         |
+| [`InMemorySessionStore`](../../kavach-py/src/lib.rs)                                      | In-process session store; usable directly when an integrator needs local session state.                  |
 | [`InMemoryInvalidationBroadcaster`](../../kavach-py/src/lib.rs)                           | In-process broadcaster; pairs with `spawn_invalidation_listener` for single-node fan-out.               |
 | [`RedisRateLimitStore`](../../kavach-py/src/lib.rs)                                       | Redis-backed rate-limit store; passed as `rate_store=` to `Gate.from_toml/from_file`.                   |
 | [`RedisSessionStore`](../../kavach-py/src/lib.rs)                                         | Redis-backed session store; shared across replicas.                                                      |
@@ -244,9 +208,6 @@ Python package entry point is [kavach-py/python/kavach/\_\_init\_\_.py](../../ka
 | [`Refused`](../../kavach-py/python/kavach/wrappers.py)                                    | Exception raised by `Gate.check` when the verdict is Refuse.                                             |
 | [`Invalidated`](../../kavach-py/python/kavach/wrappers.py)                                | Exception raised by `Gate.check` when the verdict is Invalidate.                                         |
 | [`guarded`](../../kavach-py/python/kavach/decorators.py)                                  | Decorator that wraps a function call in a Kavach `check`.                                                |
-| [`guarded_tool`](../../kavach-py/python/kavach/decorators.py)                             | Decorator variant tuned for MCP tool handlers.                                                            |
-| [`McpKavachMiddleware`](../../kavach-py/python/kavach/mcp.py)                             | MCP middleware for Python MCP servers; accepts an optional `session_store`.                              |
-| [`HttpKavachMiddleware`](../../kavach-py/python/kavach/http.py)                           | Flask / ASGI middleware for Python HTTP servers.                                                          |
 
 ---
 
@@ -272,18 +233,8 @@ TypeScript entry point is [kavach-node/npm/src/index.ts](../../kavach-node/npm/s
 | [`KavachRefused`](../../kavach-node/npm/src/index.ts)                                      | Error thrown by `Gate.check` on Refuse; carries `reason`, `evaluator`, `code`.                           |
 | [`KavachInvalidated`](../../kavach-node/npm/src/index.ts)                                  | Error thrown by `Gate.check` on Invalidate.                                                               |
 | [`InMemoryInvalidationBroadcaster`](../../kavach-node/npm/src/index.ts)                    | In-process broadcaster; pass to `GateOptions.broadcaster` and pair with `spawnInvalidationListener`.       |
-| [`InMemorySessionStore`](../../kavach-node/npm/src/mcp.ts)                                 | In-process session store; passed to `McpKavachMiddleware` via `{ sessionStore }`.                         |
 | [`spawnInvalidationListener`](../../kavach-node/npm/src/index.ts)                          | Spawns a listener that invokes a callback on every `InvalidationScopeView`; returns `InvalidationListenerHandle`. |
 | [`InvalidationListenerHandle`](../../kavach-node/npm/src/index.ts)                         | Handle with `.abort()` to stop the listener.                                                              |
-| [`McpKavachMiddleware`](../../kavach-node/npm/src/mcp.ts)                                  | MCP middleware; `checkToolCall`, `evaluateToolCall`, `guardTool`, `invalidateSession`.                    |
-| [`McpMiddlewareOptions`](../../kavach-node/npm/src/mcp.ts)                                 | Options: `sessionStore`, plus caller-info defaults.                                                       |
-| [`SessionStore`](../../kavach-node/npm/src/mcp.ts)                                         | Type interface for pluggable session stores consumed by `McpKavachMiddleware`.                            |
-| [`McpCallerInfo`](../../kavach-node/npm/src/mcp.ts)                                        | Caller shape: `callerId`, `callerKind`, `roles`, `sessionId`, `ip`, `currentGeo`, `originGeo`.            |
-| [`HttpKavachMiddleware`](../../kavach-node/npm/src/http.ts)                                | Framework-agnostic HTTP middleware class.                                                                 |
-| [`HttpMiddlewareOptions`](../../kavach-node/npm/src/http.ts)                               | Options: `gateMutationsOnly`, `excludedPaths`, `principalHeader`, `rolesHeader`, `kindHeader`, `geoResolver`. |
-| [`createExpressMiddleware`](../../kavach-node/npm/src/http.ts)                             | Factory: returns an Express middleware function.                                                          |
-| [`createFastifyHook`](../../kavach-node/npm/src/http.ts)                                   | Factory: returns a Fastify `onRequest` hook.                                                              |
-| [`deriveActionName`](../../kavach-node/npm/src/http.ts)                                    | Helper: `(method, path) => "<resource>.<verb>"` derivation used by the Node HTTP middleware.              |
 
 Note: the native-engine type aliases `AuditEntryOptions`, `GeoLocationInput`, `PermitTokenInput`, `PermitTokenView`, `PublicKeyBundleView`, `VerdictResult`, `ActionContextInput` are also re-exported (or consumed internally) from [kavach-node/npm/src/index.ts](../../kavach-node/npm/src/index.ts).
 

@@ -1,12 +1,60 @@
 # Policies
 
-Kavach policies are TOML. The policy engine evaluates them in priority order and the first matching policy determines the verdict. If no policy matches, the gate refuses with code `NO_POLICY_MATCH` (default-deny).
+Kavach policies are a small, fixed condition vocabulary. The policy engine evaluates them in priority order and the first matching policy determines the verdict. If no policy matches, the gate refuses with code `NO_POLICY_MATCH` (default-deny).
 
-This document covers the model and the common cases. For the complete condition-by-condition grammar, see [reference/policy-language.md](../reference/policy-language.md).
+Policies can be authored in three interchangeable formats (TOML, native dict / object, JSON). Pick whichever fits your workflow; you can switch between them without changing how the gate behaves. The condition vocabulary, defaults, and fail-closed semantics are identical across formats.
 
-## File structure
+This document covers the model and the common cases. For the complete condition-by-condition grammar, see [reference/policy-language.md](../reference/policy-language.md). For the TOML-specific workflow with Rust / Python / Node examples side by side, see [guides/toml-policies.md](../guides/toml-policies.md).
 
-A policy file is a sequence of `[[policy]]` tables:
+## Structure
+
+A policy is a named rule with an `effect`, a `priority`, and an AND-combined list of `conditions`.
+
+**As a Python dict** (the idiomatic Python loader):
+
+```python
+policy = {
+    "policies": [
+        {
+            "name": "agent_small_refunds",
+            "description": "AI agents can issue refunds up to 5,000",
+            "effect": "permit",
+            "priority": 10,
+            "conditions": [
+                {"identity_kind": "agent"},
+                {"action": "issue_refund"},
+                {"param_max": {"field": "amount", "max": 5000.0}},
+                {"rate_limit": {"max": 50, "window": "24h"}},
+                {"session_age_max": "4h"},
+            ],
+        },
+    ],
+}
+```
+
+**As a JS object** (the idiomatic Node loader):
+
+```typescript
+const policy = {
+  policies: [
+    {
+      name: 'agent_small_refunds',
+      description: 'AI agents can issue refunds up to 5,000',
+      effect: 'permit',
+      priority: 10,
+      conditions: [
+        { identity_kind: 'agent' },
+        { action: 'issue_refund' },
+        { param_max: { field: 'amount', max: 5000.0 } },
+        { rate_limit: { max: 50, window: '24h' } },
+        { session_age_max: '4h' },
+      ],
+    },
+  ],
+};
+```
+
+**As TOML** (the operator workflow):
 
 ```toml
 [[policy]]
@@ -31,41 +79,41 @@ Per-policy fields:
 - `priority` (optional, default `100`), lower numbers run first.
 - `description` (optional), free-form.
 
-An empty policy file is valid; it refuses every action.
+An empty policy set is valid; it refuses every action (kill-switch shape).
 
 ## Loading policies
 
-Three formats are accepted, with identical semantics. Use whichever fits your workflow; you can switch between them without changing how the gate behaves.
+Each SDK exposes loaders for every format so you can pick based on workflow.
 
 ```rust
-// Rust (kavach-core), TOML only at the core level.
+// Rust (kavach-core): TOML only at the core level.
 let policies = PolicySet::from_file("kavach.toml")?;
 let policies = PolicySet::from_toml(toml_string)?;
 ```
 
 ```python
-# Python SDK, three options.
+# Python: dict is the recommended programmatic surface.
 from kavach import Gate
 
-gate = Gate.from_toml(toml_string)             # canonical TOML
-gate = Gate.from_file("kavach.toml")            # TOML file
-gate = Gate.from_dict(policy_dict)              # native Python dict
-gate = Gate.from_json_string(json_string)       # JSON string
+gate = Gate.from_dict(policy_dict)              # native Python dict (recommended)
+gate = Gate.from_json_string(json_string)       # JSON over the wire
 gate = Gate.from_json_file("kavach.json")       # JSON file
+gate = Gate.from_toml(toml_string)              # operator-edited TOML
+gate = Gate.from_file("kavach.toml")            # TOML file
 ```
 
 ```typescript
-// Node SDK, three options.
+// Node: object is the recommended programmatic surface.
 import { Gate } from 'kavach';
 
-const gate = Gate.fromToml(tomlString);
-const gate = Gate.fromFile('kavach.toml');
-const gate = Gate.fromObject(policyObject);     // native JS object
+const gate = Gate.fromObject(policyObject);     // native JS object (recommended)
 const gate = Gate.fromJsonString(jsonString);
 const gate = Gate.fromJsonFile('kavach.json');
+const gate = Gate.fromToml(tomlString);
+const gate = Gate.fromFile('kavach.toml');
 ```
 
-The condition vocabulary, defaults, and fail-closed semantics are identical across formats. Typo'd field names raise a clear error in every loader (`unknown field 'idnetity_kind', expected one of ...`) so a misspelled condition can never silently weaken a policy.
+Typo'd field names raise a clear error in every loader (`unknown field 'idnetity_kind', expected one of ...`) so a misspelled condition can never silently weaken a policy.
 
 ## Effect
 
@@ -208,13 +256,18 @@ policy_engine.reload(new_policy_set);
 ```
 
 ```python
-# Python
+# Python: reload accepts a TOML string.
 gate.reload(new_policy_toml)
 ```
 
-Reload takes `&self`, so it works through an `Arc<PolicyEngine>` shared with the gate. In-flight evaluations keep using the old set until they finish; subsequent calls pick up the new set. Parse errors raise (Python) or return `Err` (Rust); the previous good set is preserved.
+```typescript
+// Node: reload accepts a TOML string.
+gate.reload(newPolicyToml);
+```
 
-Pair `reload` with the `watcher` feature on `kavach-core` to auto-reload from disk on change; see [guides/rust.md](../guides/rust.md) and [operations/deployment-patterns.md](../operations/deployment-patterns.md).
+Reload takes `&self`, so it works through an `Arc<PolicyEngine>` shared with the gate. In-flight evaluations keep using the old set until they finish; subsequent calls pick up the new set. Parse errors raise (Python) or throw (Node) or return `Err` (Rust); the previous good set is preserved.
+
+Pair `reload` with the `watcher` feature on `kavach-core` to auto-reload from disk on change; see [guides/rust.md](../guides/rust.md), [guides/toml-policies.md](../guides/toml-policies.md), and [operations/deployment-patterns.md](../operations/deployment-patterns.md).
 
 ## Cross-references
 
