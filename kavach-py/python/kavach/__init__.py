@@ -1,5 +1,5 @@
 """
-Kavach कवच — Post-quantum execution boundary enforcement.
+Kavach कवच, Post-quantum execution boundary enforcement.
 
 All gate evaluation runs in compiled Rust via the _kavach_engine module.
 This package provides idiomatic Python wrappers, decorators, and helpers.

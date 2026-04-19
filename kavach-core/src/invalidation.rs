@@ -1,21 +1,21 @@
 //! Pluggable session-invalidation broadcast.
 //!
 //! When the gate returns `Verdict::Invalidate` on one node, every other node
-//! that holds the same session must be told — otherwise an attacker whose
+//! that holds the same session must be told, otherwise an attacker whose
 //! session was killed on node A can hop to node B and keep operating.
 //!
 //! This module defines the fan-out primitive:
 //!
-//! - [`InvalidationBroadcaster`] — publish+subscribe trait that ships an
+//! - [`InvalidationBroadcaster`], publish+subscribe trait that ships an
 //!   [`InvalidationScope`] to every interested node.
-//! - [`NoopInvalidationBroadcaster`] — default. Single-node deployments see
+//! - [`NoopInvalidationBroadcaster`], default. Single-node deployments see
 //!   exactly today's behavior (invalidation is local-only). No background
 //!   tasks, no network.
-//! - [`InMemoryInvalidationBroadcaster`] — process-local fan-out over a
+//! - [`InMemoryInvalidationBroadcaster`], process-local fan-out over a
 //!   `tokio::sync::broadcast` channel. Useful for multi-listener testing and
 //!   for in-process integrations where the gate and session handler are
 //!   separate subsystems.
-//! - [`spawn_invalidation_listener`] — helper that drives a user-supplied
+//! - [`spawn_invalidation_listener`], helper that drives a user-supplied
 //!   async handler with every received scope. The integrator owns the
 //!   returned [`JoinHandle`] and decides when to stop the listener.
 //!
@@ -23,7 +23,7 @@
 //!
 //! Publishing is best-effort. If the broadcaster returns `Err` on `publish`,
 //! the gate logs the failure and **still returns the `Invalidate` verdict**
-//! — the local node invalidates normally. A broadcast outage must not
+//!, the local node invalidates normally. A broadcast outage must not
 //! downgrade a security decision the local evaluators already made.
 //!
 //! `BroadcastError::Lagged(n)` specifically means `n` messages were dropped
@@ -51,7 +51,7 @@ pub enum BroadcastError {
     BackendUnavailable(String),
 
     /// Subscriber fell behind and missed `n` messages.
-    #[error("invalidation subscriber lagged — {0} messages dropped")]
+    #[error("invalidation subscriber lagged, {0} messages dropped")]
     Lagged(u64),
 
     /// The broadcast channel has been closed (sender dropped, etc.).
@@ -76,14 +76,14 @@ pub trait InvalidationBroadcaster: Send + Sync {
     async fn publish(&self, scope: InvalidationScope) -> Result<(), BroadcastError>;
 
     /// Open a new subscription. Each call returns an independent receiver
-    /// — calling `subscribe()` twice yields two receivers, both of which
+    ///, calling `subscribe()` twice yields two receivers, both of which
     /// will see every future `publish`.
     ///
     /// Subscribers created *after* a `publish` do not see that publish.
     fn subscribe(&self) -> broadcast::Receiver<InvalidationScope>;
 }
 
-/// No-op broadcaster — the default.
+/// No-op broadcaster, the default.
 ///
 /// `publish` succeeds without doing anything. `subscribe` returns a receiver
 /// attached to a channel no one sends on; the receiver stays open forever
@@ -123,7 +123,7 @@ impl InvalidationBroadcaster for NoopInvalidationBroadcaster {
 /// Process-local broadcaster backed by `tokio::sync::broadcast`.
 ///
 /// Every `subscribe()` returns a new receiver; every `publish()` fans out to
-/// all live receivers. Not distributed — each process has its own sender.
+/// all live receivers. Not distributed, each process has its own sender.
 #[derive(Debug, Clone)]
 pub struct InMemoryInvalidationBroadcaster {
     sender: broadcast::Sender<InvalidationScope>,
@@ -159,7 +159,7 @@ impl Default for InMemoryInvalidationBroadcaster {
 impl InvalidationBroadcaster for InMemoryInvalidationBroadcaster {
     async fn publish(&self, scope: InvalidationScope) -> Result<(), BroadcastError> {
         // `broadcast::Sender::send` returns `Err` only when there are zero
-        // receivers — which is legitimate ("nobody is listening") and should
+        // receivers, which is legitimate ("nobody is listening") and should
         // not surface as an error. Treat it as success.
         let _ = self.sender.send(scope);
         Ok(())
@@ -177,7 +177,7 @@ impl InvalidationBroadcaster for InMemoryInvalidationBroadcaster {
 /// (abort on shutdown, etc.). The task exits cleanly when the broadcaster
 /// has no more senders (channel closed).
 ///
-/// `Lagged` errors are logged and recovery continues — a temporarily slow
+/// `Lagged` errors are logged and recovery continues, a temporarily slow
 /// handler shouldn't kill the listener.
 pub fn spawn_invalidation_listener<F, Fut>(
     broadcaster: Arc<dyn InvalidationBroadcaster>,
@@ -199,9 +199,9 @@ where
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!(
                         dropped = n,
-                        "invalidation listener lagged — messages dropped",
+                        "invalidation listener lagged, messages dropped",
                     );
-                    // Continue — next recv will get a fresh message.
+                    // Continue, next recv will get a fresh message.
                 }
             }
         }
@@ -214,7 +214,7 @@ where
 /// For `InvalidationTarget::Session(uuid)`, looks up the session by its
 /// external key (if the integrator stores sessions keyed by the UUID
 /// string). For `Principal` and `Role` targets, iterates the store is not
-/// possible through the trait — those require integrator-specific logic
+/// possible through the trait, those require integrator-specific logic
 /// and are logged as "unhandled" here.
 ///
 /// Use [`spawn_invalidation_listener`] with a custom handler if you need
@@ -248,13 +248,13 @@ pub fn spawn_session_store_listener(
                 InvalidationTarget::Principal(id) => {
                     tracing::info!(
                         principal = %id,
-                        "remote principal invalidation received — integrator must handle"
+                        "remote principal invalidation received, integrator must handle"
                     );
                 }
                 InvalidationTarget::Role(role) => {
                     tracing::info!(
                         role = %role,
-                        "remote role invalidation received — integrator must handle"
+                        "remote role invalidation received, integrator must handle"
                     );
                 }
             }

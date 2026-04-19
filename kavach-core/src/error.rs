@@ -18,7 +18,7 @@ pub enum KavachError {
     #[error("audit error: {0}")]
     Audit(String),
 
-    #[error("invariant violation: {name} — {reason}")]
+    #[error("invariant violation: {name}, {reason}")]
     InvariantViolation { name: String, reason: String },
 
     #[error("io error: {0}")]

@@ -73,18 +73,18 @@ def handle_tool_call(tool_name: str, params: dict, caller_id: str = "support-bot
     )
 
     if verdict.is_permit:
-        # Gate allowed — execute the tool
+        # Gate allowed, execute the tool
         if tool_name == "read_order":
             result = read_order(params["order_id"])
         elif tool_name == "issue_refund":
             result = issue_refund(params["order_id"], params["amount"])
         else:
             result = {"error": "unknown tool"}
-        print(f"  ✓ PERMITTED — result: {result}")
+        print(f"  ✓ PERMITTED, result: {result}")
     elif verdict.is_refuse:
-        print(f"  ✗ REFUSED — [{verdict.code}] {verdict.evaluator}: {verdict.reason}")
+        print(f"  ✗ REFUSED, [{verdict.code}] {verdict.evaluator}: {verdict.reason}")
     elif verdict.is_invalidate:
-        print(f"  ⊘ INVALIDATED — {verdict.reason}")
+        print(f"  ⊘ INVALIDATED, {verdict.reason}")
         kavach.invalidate_session("session_001")
 
 
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     # Should REFUSE (over ₹5,000 agent limit)
     handle_tool_call("issue_refund", {"order_id": "ORD-7890", "amount": 25_000.0})
 
-    # Should REFUSE (no policy for this tool — default deny)
+    # Should REFUSE (no policy for this tool, default deny)
     handle_tool_call("delete_customer", {"customer_id": "cust_456"})
 
     print("\n=== Done ===")

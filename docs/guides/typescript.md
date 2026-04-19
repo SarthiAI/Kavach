@@ -12,7 +12,7 @@ For the Rust surface underneath, see [rust.md](rust.md). For the Python equivale
 npm install kavach
 ```
 
-Native addons ship for Linux x64/arm64 and macOS x64/arm64. Node 18+ is supported.
+Native addons ship for Linux x64/arm64 and macOS x64/arm64. Node 20+ is supported.
 
 ```typescript
 import { Gate } from 'kavach';                   // core
@@ -62,14 +62,38 @@ An empty policy string is valid. It default-denies, which is the kill-switch sha
 
 ## Constructing a `Gate`
 
-Two factories, both accepting the same `GateOptions`.
+Five factories, all accepting the same `GateOptions`. Pick whichever fits how you store or generate policies; they all produce identical behavior.
 
 ```typescript
 import { Gate, GateOptions } from 'kavach';
 
-Gate.fromToml(policyToml: string, options?: GateOptions): Gate
-Gate.fromFile(path: string,       options?: GateOptions): Gate
+Gate.fromToml(policyToml: string,    options?: GateOptions): Gate  // TOML string
+Gate.fromFile(path: string,          options?: GateOptions): Gate  // TOML file
+Gate.fromObject(policies: object,    options?: GateOptions): Gate  // native JS object
+Gate.fromJsonString(json: string,    options?: GateOptions): Gate  // JSON string (wire body)
+Gate.fromJsonFile(path: string,      options?: GateOptions): Gate  // JSON file on disk
 ```
+
+All five share the same condition vocabulary; see [reference/policy-language.md](../reference/policy-language.md) for the full grammar. Typo'd or unknown field names throw a clear error in every loader. Example:
+
+```typescript
+const gate = Gate.fromObject({
+  policies: [
+    {
+      name: 'agent_small_refunds',
+      effect: 'permit',
+      conditions: [
+        { identity_kind: 'agent' },
+        { action: 'issue_refund' },
+        { param_max: { field: 'amount', max: 5000 } },
+        { rate_limit: { max: 50, window: '24h' } },
+      ],
+    },
+  ],
+});
+```
+
+For programmatic policy construction (admin UI submissions, database rows, feature flags), `fromObject` is usually the cleanest path: build the object however you like, hand it to the gate, no string templating.
 
 `GateOptions` shape:
 
@@ -81,6 +105,7 @@ interface GateOptions {
   enableDrift?: boolean;                 // default true
   tokenSigner?: PqTokenSigner;           // signs every Permit; fails closed on error
   geoDriftMaxKm?: number;                // tolerant GeoLocationDrift; missing geo still fails closed
+  broadcaster?: InMemoryInvalidationBroadcaster; // publishes Invalidate verdicts; see "In-process invalidation"
 }
 ```
 
@@ -419,6 +444,38 @@ const raw = bobCh.receiveData(enc);
 Replay, ciphertext tamper, wrong recipient, wrong `expectedContextId`, and unsigned-into-`receiveSigned` all throw.
 
 `aliceCh.localKeyId` and `aliceCh.remoteKeyId` expose the bound key IDs for diagnostics.
+
+---
+
+## In-process invalidation
+
+The Node SDK ships an in-process `InMemoryInvalidationBroadcaster` plus a listener bridge. Wire them up when you want every `Invalidate` verdict in the process to fan out to an MCP session store, an HTTP session cache, a metrics sink, or anything else that needs to react.
+
+```typescript
+import {
+  Gate,
+  InMemoryInvalidationBroadcaster, InMemorySessionStore,
+  McpKavachMiddleware, spawnInvalidationListener,
+} from 'kavach';
+
+const broadcaster = new InMemoryInvalidationBroadcaster();
+const gate = Gate.fromToml(POLICY, { broadcaster });
+
+// McpKavachMiddleware can share a session store so invalidations propagate
+// to every tool call on this process.
+const mcp = new McpKavachMiddleware(gate, { sessionStore: new InMemorySessionStore() });
+
+const handle = spawnInvalidationListener(broadcaster, (scope) => {
+  console.log(`invalidated: ${scope.target} (${scope.reason})`);
+});
+
+// On shutdown:
+handle.abort();
+```
+
+`InvalidationScopeView` exposes `.target` (session / principal / role), `.reason`, and `.evaluator`. Listener callback errors are caught and logged; they do not kill the listener.
+
+For multi-replica deployments the canonical fan-out is Redis Pub/Sub; the Rust-side `RedisInvalidationBroadcaster` is documented in [guides/distributed.md](distributed.md). The Node SDK does not ship a Redis binding yet; bridge to the Rust layer through a sidecar, or pair this in-process broadcaster with a Redis-backed listener you implement alongside your session cache.
 
 ---
 

@@ -6,13 +6,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SarthiAI/Kavach/actions"><img src="https://img.shields.io/github/actions/workflow/status/SarthiAI/Kavach/ci.yml?label=CI&style=flat-square" alt="CI"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Elastic--2.0-blue?style=flat-square" alt="License"></a>
   <a href="./docs/README.md"><img src="https://img.shields.io/badge/docs-read-informational?style=flat-square" alt="Docs"></a>
   <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-PQ%20ready-brightgreen?style=flat-square" alt="Security: PQ"></a>
-  <img src="https://img.shields.io/badge/rust-1.75%2B-orange?style=flat-square" alt="Rust 1.75+">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/node-20%2B-green?style=flat-square" alt="Node 20+">
+  <img src="https://img.shields.io/badge/rust-1.75%2B-orange?style=flat-square" alt="Rust 1.75+">
 </p>
 
 ---
@@ -74,54 +72,131 @@ You get both, together. Every gate decision lands in the audit chain. Every perm
 
 ## See it in action
 
-An AI support agent trying to issue refunds. The gate does the deciding.
+An AI support agent trying to issue refunds. Same business scenario in both SDKs; the gate does the deciding.
+
+### Python
 
 ```python
-from kavach import Gate
+from kavach import ActionContext, Gate
 
-policy = """
-[[policy]]
-name = "agent_small_refunds"
-effect = "permit"
-conditions = [
-    { identity_kind = "agent" },
-    { action = "issue_refund" },
-    { param_max = { field = "amount", max = 5000.0 } },
-    { rate_limit = { max = 50, window = "24h" } },
-]
-"""
+# Policy as a native Python dict. No separate config format to learn.
+POLICY = {
+    "policies": [
+        {
+            "name": "agent_small_refunds",
+            "effect": "permit",
+            "conditions": [
+                {"identity_kind": "agent"},
+                {"action": "issue_refund"},
+                {"param_max": {"field": "amount", "max": 5000.0}},
+                {"rate_limit": {"max": 50, "window": "24h"}},
+            ],
+        },
+    ],
+}
 
-gate = Gate.from_toml(
-    policy,
+gate = Gate.from_dict(
+    POLICY,
     invariants=[("compliance_cap", "amount", 50_000.0)],  # immutable, even by policy
 )
 
-# Within policy: permit.
-v = gate.evaluate(
-    principal_id="bot-1", principal_kind="agent",
-    action_name="issue_refund", params={"amount": 500},
-)
+def ctx(amount: float) -> ActionContext:
+    return ActionContext(
+        principal_id="bot-1", principal_kind="agent",
+        action_name="issue_refund", params={"amount": amount},
+    )
+
+# Within the policy's 5_000 cap: permit.
+v = gate.evaluate(ctx(500.0))
 assert v.is_permit
 
-# Exceeds the ₹5,000 policy cap: refuse.
-v = gate.evaluate(
-    principal_id="bot-1", principal_kind="agent",
-    action_name="issue_refund", params={"amount": 10_000},
-)
+# Over the 5_000 cap, so no policy matches: default-deny refuse.
+v = gate.evaluate(ctx(10_000.0))
 assert v.is_refuse
-print(v.code)       # "POLICY_NO_MATCH"
+print(v.code)       # "NO_POLICY_MATCH"
 
-# Rogue admin ships a policy that permits ₹1,00,000. Invariant still refuses.
-gate.reload(policy.replace("5000.0", "100000.0"))
-v = gate.evaluate(
-    principal_id="bot-1", principal_kind="agent",
-    action_name="issue_refund", params={"amount": 60_000},
-)
+# A rogue admin ships a more permissive policy. The invariant still refuses.
+ROGUE = {
+    "policies": [{
+        "name": "agent_small_refunds",
+        "effect": "permit",
+        "conditions": [
+            {"identity_kind": "agent"},
+            {"action": "issue_refund"},
+            {"param_max": {"field": "amount", "max": 100_000.0}},  # the rogue change
+        ],
+    }],
+}
+rogue_gate = Gate.from_dict(ROGUE, invariants=[("compliance_cap", "amount", 50_000.0)])
+v = rogue_gate.evaluate(ctx(60_000.0))
 assert v.is_refuse
 print(v.evaluator)  # "invariants", because policies cannot override this
 ```
 
-Same semantics from TypeScript, Rust, or an MCP tool call.
+### TypeScript / Node
+
+```typescript
+import { Gate, type EvaluateOptions } from 'kavach';
+
+// Policy as a plain JS object. No separate config format to learn.
+const POLICY = {
+  policies: [
+    {
+      name: 'agent_small_refunds',
+      effect: 'permit',
+      conditions: [
+        { identity_kind: 'agent' },
+        { action: 'issue_refund' },
+        { param_max: { field: 'amount', max: 5000 } },
+        { rate_limit: { max: 50, window: '24h' } },
+      ],
+    },
+  ],
+};
+
+const gate = Gate.fromObject(POLICY, {
+  invariants: [{ name: 'compliance_cap', field: 'amount', maxValue: 50_000 }], // immutable, even by policy
+});
+
+const ctx = (amount: number): EvaluateOptions => ({
+  principalId: 'bot-1',
+  principalKind: 'agent',
+  actionName: 'issue_refund',
+  params: { amount },
+});
+
+// Within the policy's 5_000 cap: permit.
+let v = gate.evaluate(ctx(500));
+console.assert(v.isPermit);
+
+// Over the 5_000 cap, so no policy matches: default-deny refuse.
+v = gate.evaluate(ctx(10_000));
+console.assert(v.isRefuse);
+console.log(v.code);       // "NO_POLICY_MATCH"
+
+// A rogue admin ships a more permissive policy. The invariant still refuses.
+const ROGUE = {
+  policies: [{
+    name: 'agent_small_refunds',
+    effect: 'permit',
+    conditions: [
+      { identity_kind: 'agent' },
+      { action: 'issue_refund' },
+      { param_max: { field: 'amount', max: 100_000 } },  // the rogue change
+    ],
+  }],
+};
+const rogueGate = Gate.fromObject(ROGUE, {
+  invariants: [{ name: 'compliance_cap', field: 'amount', maxValue: 50_000 }],
+});
+v = rogueGate.evaluate(ctx(60_000));
+console.assert(v.isRefuse);
+console.log(v.evaluator);  // "invariants", because policies cannot override this
+```
+
+Both SDKs delegate every `evaluate` to the same compiled Rust engine, so policy semantics, drift detection, invariants, and PQ signing behave identically across them. The Rust API is also available directly via `kavach-core` for services that want to embed the gate in-process; see the [Rust guide](./docs/guides/rust.md).
+
+Policies can be loaded in three ways: from a TOML string (operator-edited config), from a native Python dict / JS object (programmatic construction), or from a JSON file (tooling that already speaks JSON). All three accept the same vocabulary; typo'd field names raise a clear error in every loader instead of being silently dropped. See [docs/reference/policy-language.md](./docs/reference/policy-language.md#three-formats-one-schema).
 
 ## What you can build with it
 
@@ -136,12 +211,12 @@ Same semantics from TypeScript, Rust, or an MCP tool call.
 
 | Language / Runtime | Install | Guide |
 |--------------------|---------|-------|
-| **Rust** | `kavach-core = "0.1"` in your `Cargo.toml` | [docs/guides/rust.md](./docs/guides/rust.md) |
 | **Python** | `pip install kavach` (one abi3 wheel per platform, covers 3.10+) | [docs/guides/python.md](./docs/guides/python.md) |
-| **TypeScript / Node** | `npm install kavach` | [docs/guides/typescript.md](./docs/guides/typescript.md) |
-| **MCP tool gating** | via Python or TypeScript SDK | [docs/guides/mcp.md](./docs/guides/mcp.md) |
-| **HTTP (Axum / Tower / Actix)** | `kavach-http` with the `tower` or `actix` feature | [docs/guides/http.md](./docs/guides/http.md) |
-| **Multi-node (Redis)** | `kavach-redis` | [docs/guides/distributed.md](./docs/guides/distributed.md) |
+| **TypeScript / Node** | `npm install kavach` (Node 20+) | [docs/guides/typescript.md](./docs/guides/typescript.md) |
+| **MCP tool gating** | bundled in both SDKs (`McpKavachMiddleware`) | [docs/guides/mcp.md](./docs/guides/mcp.md) |
+| **HTTP middleware** | bundled in the Python SDK (FastAPI) and Node SDK (Express, Fastify); also `kavach-http` for Rust (Axum / Tower / Actix) | [docs/guides/http.md](./docs/guides/http.md) |
+| **Multi-node (Redis)** | `RedisRateLimitStore` / `RedisSessionStore` / `RedisInvalidationBroadcaster` exposed from the Python SDK; Rust via `kavach-redis` | [docs/guides/distributed.md](./docs/guides/distributed.md) |
+| **Rust (embed in-process)** | `kavach-core = "0.1"` in your `Cargo.toml` | [docs/guides/rust.md](./docs/guides/rust.md) |
 
 Or start with the [five-minute quickstart](./docs/quickstart.md).
 
@@ -207,8 +282,10 @@ Security issues go to `support@sarthiai.com`, not the public tracker.
 
 [Elastic License 2.0](./LICENSE). Source-available. You are free to use, embed, modify, and redistribute Kavach for any purpose, including commercial use inside your products. You may **not** offer Kavach itself as a hosted or managed service that substitutes for the features of this software, and you may not remove or obscure the license notices.
 
-In plain language: build on top of Kavach, ship it inside your products, modify it for your own use. Do not repackage it and sell it as "MyGate."
+In plain language: build on top of Kavach, ship it inside your products, modify it for your own use. Do not repackage it and sell it as "MySecuritySolution."
 
 ---
 
 <p align="center"><em>Built with Rust. Runs post-quantum. Says no by default.</em></p>
+
+<p align="center">The Kavach project is envisioned, developed and maintained by <a href="https://www.linkedin.com/in/chirotpal/">Chirotpal</a>.</p>

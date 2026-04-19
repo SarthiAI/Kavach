@@ -110,7 +110,7 @@ impl Encryptor {
         let (kem_ct, pq_shared) = ek.encapsulate_with_rng(&mut rng);
         let kem_ciphertext = kem_ct.as_slice().to_vec();
 
-        // 2. Optional X25519 hybrid DH using a true EphemeralSecret —
+        // 2. Optional X25519 hybrid DH using a true EphemeralSecret,
         //    x25519-dalek's dedicated one-shot type that's consumed by
         //    `diffie_hellman` so it can't accidentally be reused.
         let (x_shared_bytes, ephemeral_pk_bytes) = if let Some(rx_bytes) = &self.recipient_x25519 {
@@ -166,7 +166,7 @@ pub struct Decryptor {
     /// X25519 secret key for hybrid mode (optional).
     x25519_sk: Option<Vec<u8>>,
 
-    /// Recipient key ID — must match the payload's `recipient_key_id` (used as AAD).
+    /// Recipient key ID, must match the payload's `recipient_key_id` (used as AAD).
     recipient_key_id: String,
 }
 
@@ -184,7 +184,7 @@ impl Decryptor {
         self
     }
 
-    /// The recipient key ID this decryptor is bound to — payloads targeting
+    /// The recipient key ID this decryptor is bound to, payloads targeting
     /// a different ID are rejected at decrypt time.
     pub fn recipient_key_id(&self) -> &str {
         &self.recipient_key_id
@@ -199,7 +199,7 @@ impl Decryptor {
             )));
         }
 
-        // 1. ML-KEM decapsulation (via slice-taking convenience wrapper — infallible)
+        // 1. ML-KEM decapsulation (via slice-taking convenience wrapper, infallible)
         let dk = load_ml_kem_decapsulation_key(&self.dk)?;
         let pq_shared = dk
             .decapsulate_slice(&payload.kem_ciphertext)
@@ -276,7 +276,7 @@ impl rand_core::TryRng for OsCryptoRng {
 }
 
 // `Rng` is blanket-impl'd for `TryRng<Error = Infallible>`, and `CryptoRng` is
-// blanket-impl'd for `TryCryptoRng<Error = Infallible>` — so we only mark the
+// blanket-impl'd for `TryCryptoRng<Error = Infallible>`, so we only mark the
 // fallible variants and the infallible ones are automatic.
 impl rand_core::TryCryptoRng for OsCryptoRng {}
 

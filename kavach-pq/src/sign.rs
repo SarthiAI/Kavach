@@ -4,7 +4,7 @@
 //! to cryptographically protect gate decisions and log entries.
 //!
 //! In hybrid mode, payloads are signed with both ML-DSA and Ed25519.
-//! Verification requires **both** signatures to be valid — an attacker
+//! Verification requires **both** signatures to be valid, an attacker
 //! must break both post-quantum and classical signing to forge a verdict.
 
 use crate::error::{PqError, Result};
@@ -22,7 +22,7 @@ use ml_dsa::{EncodedSignature, MlDsa65, Signature as MlDsaSignature};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A signed payload — the original data plus its cryptographic signature.
+/// A signed payload, the original data plus its cryptographic signature.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedPayload {
     /// The original data that was signed.
@@ -166,7 +166,7 @@ impl Signer {
 
 /// Verifies ML-DSA-65 (and optionally Ed25519) signatures.
 pub struct Verifier {
-    /// ML-DSA-65 verifying key — encoded form.
+    /// ML-DSA-65 verifying key, encoded form.
     ml_dsa_key: Vec<u8>,
 
     /// Ed25519 verifying key (for hybrid mode).

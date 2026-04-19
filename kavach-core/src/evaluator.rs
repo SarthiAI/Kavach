@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 /// A single evaluation step in the gate's pipeline.
 ///
-/// Evaluators are composable — the gate runs them in sequence and stops
+/// Evaluators are composable, the gate runs them in sequence and stops
 /// at the first Refuse or Invalidate. All evaluators must return Permit
 /// for the action to proceed.
 ///
@@ -42,9 +42,9 @@ pub trait Evaluator: Send + Sync {
     /// Evaluate the action context and return a verdict.
     ///
     /// The evaluator should examine the context and decide:
-    /// - `Permit` — this evaluator has no objection
-    /// - `Refuse` — this evaluator blocks the action
-    /// - `Invalidate` — this evaluator revokes broader authority
+    /// - `Permit`, this evaluator has no objection
+    /// - `Refuse`, this evaluator blocks the action
+    /// - `Invalidate`, this evaluator revokes broader authority
     async fn evaluate(&self, ctx: &ActionContext) -> Verdict;
 
     /// Priority order (lower = evaluated first). Default is 100.

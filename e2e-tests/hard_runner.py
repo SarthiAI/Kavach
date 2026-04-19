@@ -88,7 +88,7 @@ class RunCtx:
 
 def record(ctx: RunCtx, num: int, name: str, passed: bool, detail: str) -> None:
     ctx.results.append(ScenarioResult(num, name, passed, detail))
-    log.info("%s scenario %d: %s — %s",
+    log.info("%s scenario %d: %s, %s",
              "✓ PASS" if passed else "✗ FAIL", num, name, detail)
     log.info("")
 
@@ -158,7 +158,7 @@ async def start_server(app, host: str, port: int, label: str) -> uvicorn.Server:
 
 
 async def s01_mixed_role_concurrent(client: httpx.AsyncClient, ctx: RunCtx) -> None:
-    """Three principals — AI agent, human support rep, admin — all firing
+    """Three principals, AI agent, human support rep, admin, all firing
     refunds concurrently. Mid-run, admin tightens the agent policy. Verify
     each principal sees the behaviour its policy defines, and the reload
     doesn't leak across principals."""
@@ -389,10 +389,10 @@ async def s02_permit_laundering(client: httpx.AsyncClient, ctx: RunCtx) -> None:
                     with_field(token_id=str(uuid.uuid4())), base_sig_hex))
     attacks.append(("field: evaluation_id = random uuid",
                     with_field(evaluation_id=str(uuid.uuid4())), base_sig_hex))
-    # Note: `key_id` in the permit body is informational — the verifier reads
+    # Note: `key_id` in the permit body is informational, the verifier reads
     # the authoritative key_id from the signed envelope inside `signature`.
     # Tampering permit.key_id doesn't affect verification (nor does it buy
-    # the attacker anything — they get the original verdict). Not a real
+    # the attacker anything, they get the original verdict). Not a real
     # attack; not tested here.
 
     # ── Cross-permit signature grafting ──
@@ -410,7 +410,7 @@ async def s02_permit_laundering(client: httpx.AsyncClient, ctx: RunCtx) -> None:
         action_name="read_order",
         origin_country="IN", current_country="IN",
     )
-    # read_order may not be permitted in hard_policies.toml — add a fallback
+    # read_order may not be permitted in hard_policies.toml, add a fallback
     # so we can still test wrong-action replay. If the agent refuses, we
     # need to give it a policy that permits read_order temporarily. Simpler:
     # tamper a valid issue_refund permit's action_name and rely on action
@@ -480,7 +480,7 @@ async def s03_key_rotation(client: httpx.AsyncClient, ctx: RunCtx) -> None:
     rr = await client.post(f"http://{PAY_HOST}:{PAY_PORT}/payments/admin/reload_directory")
     assert rr.status_code == 200
 
-    # Step 4: replay all K1 permits — every one should 401 now (key missing).
+    # Step 4: replay all K1 permits, every one should 401 now (key missing).
     post_rotate_rejected = 0
     for i, perm in enumerate(captured):
         resp = await post_refund(
@@ -535,7 +535,7 @@ async def s03_key_rotation(client: httpx.AsyncClient, ctx: RunCtx) -> None:
 async def s04_kill_switch(client: httpx.AsyncClient, ctx: RunCtx) -> None:
     """10 concurrent admins issue refunds at ~20/s. Mid-run, empty policy
     pushed. Measure time between reload completion and first post-reload
-    refusal. Should be < 100ms — any slower implies stale state."""
+    refusal. Should be < 100ms, any slower implies stale state."""
     log.info("━━━ Scenario 4: kill-switch (empty policy) propagation speed ━━━")
 
     RUN_SECONDS = 4
@@ -589,7 +589,7 @@ async def s04_kill_switch(client: httpx.AsyncClient, ctx: RunCtx) -> None:
         detail = "reload or first-refuse not observed"
     else:
         delta_ms = (timeline.first_refuse_after_reload_at - timeline.reload_completed_at) * 1000
-        # Must be near-instant — allow up to 200ms for pytest-like scheduling
+        # Must be near-instant, allow up to 200ms for pytest-like scheduling
         # on busy runners. Also require zero Permits after reload.
         ok = delta_ms < 200 and timeline.permits_after_reload == 0
         detail = (
@@ -685,7 +685,7 @@ conditions = [
 async def s06_audit_forensics(client: httpx.AsyncClient, ctx: RunCtx) -> None:
     """Export the audit chain built up over scenarios 1-5. A simulated
     auditor (who only has the agent's public bundle) reconstructs per-principal
-    statistics and attempts five tamper variants — all must be detected."""
+    statistics and attempts five tamper variants, all must be detected."""
     log.info("━━━ Scenario 6: audit forensics + 5 tamper variants ━━━")
 
     # Export the chain to disk.
@@ -704,7 +704,7 @@ async def s06_audit_forensics(client: httpx.AsyncClient, ctx: RunCtx) -> None:
         log.error("clean verify failed: %s", err)
 
     # Decode per-entry principal/verdict. The audit-entry JSON is stored
-    # inside signed_payload.data as a byte array (list of ints) — the bytes
+    # inside signed_payload.data as a byte array (list of ints), the bytes
     # are what was signed, so the verifier reconstructs exactly what the
     # signer signed.
     lines = [l for l in chain_bytes.decode().splitlines() if l.strip()]
@@ -791,7 +791,7 @@ async def s06_audit_forensics(client: httpx.AsyncClient, ctx: RunCtx) -> None:
     t4 = chain_bytes + (json.dumps(fake_line) + "\n").encode()
     tampers.append(("append forged entry", t4, "signature"))
 
-    # T5: splice — strip the ed25519_signature inside signed_payload of the
+    # T5: splice, strip the ed25519_signature inside signed_payload of the
     # first entry. That makes one entry PQ-only while the rest stay hybrid.
     # detect_mode sees a mixed chain → reject before any crypto runs.
     if lines:
@@ -809,7 +809,7 @@ async def s06_audit_forensics(client: httpx.AsyncClient, ctx: RunCtx) -> None:
     for name, data, _expected_error_class in tampers:
         err = try_verify(data)
         rejected = err is not None
-        results.append((name, rejected, err or "(verified — shouldn't have)"))
+        results.append((name, rejected, err or "(verified, shouldn't have)"))
         log.info("tamper [%s] → %s", name, "REJECTED" if rejected else "ACCEPTED (BAD)")
 
     all_rejected = all(r[1] for r in results)
@@ -825,7 +825,7 @@ async def s06_audit_forensics(client: httpx.AsyncClient, ctx: RunCtx) -> None:
 
 
 async def main() -> int:
-    console.rule("[bold cyan]Kavach hard E2E — compound scenarios")
+    console.rule("[bold cyan]Kavach hard E2E, compound scenarios")
     log.info("setting up keys + signed directory")
     bs = setup(STATE_DIR)
     log.info("agent key_id = %s", bs.agent_kp.public_keys().id)

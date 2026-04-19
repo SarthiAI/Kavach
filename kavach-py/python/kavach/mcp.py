@@ -14,7 +14,7 @@ Example:
 
     @server.call_tool()
     async def handle_tool(name: str, arguments: dict) -> list:
-        # Gate the call — raises Refused if blocked
+        # Gate the call, raises Refused if blocked
         kavach.check_tool_call(
             tool_name=name,
             params=arguments,
@@ -39,7 +39,7 @@ across service replicas::
 The middleware will consult the store before every gated call and
 raise :class:`~kavach.Invalidated` when a peer has revoked the
 session. Without ``session_store``, an in-process
-:class:`~kavach.InMemorySessionStore` is used — same code path,
+:class:`~kavach.InMemorySessionStore` is used, same code path,
 single-node scope.
 """
 
@@ -90,7 +90,7 @@ class McpKavachMiddleware:
         Args:
             gate: The Kavach gate this middleware evaluates against.
             session_store: Optional backend for cross-replica session
-                state — accepts an :class:`~kavach.InMemorySessionStore`
+                state, accepts an :class:`~kavach.InMemorySessionStore`
                 or a :class:`~kavach.RedisSessionStore`. When unset, an
                 in-process ``InMemorySessionStore`` is used internally
                 so the same code path serves both single-node and
@@ -105,7 +105,7 @@ class McpKavachMiddleware:
         )
         # Local cache of McpSession views (principal-facing fields that
         # aren't part of SessionState). Action-count mutations in here
-        # are observational only — the gate itself reads action_count
+        # are observational only, the gate itself reads action_count
         # from the ActionContext the caller passes in, not from this
         # cache.
         self._sessions: dict[str, McpSession] = {}
@@ -173,7 +173,7 @@ class McpKavachMiddleware:
         # Crosses into Rust for evaluation
         self._gate.check(ctx)
 
-        # If we get here, gate permitted — track the action locally
+        # If we get here, gate permitted, track the action locally
         if session_id:
             session = self._sessions.setdefault(
                 session_id,
@@ -200,7 +200,7 @@ class McpKavachMiddleware:
         current_geo: GeoLocation | None = None,
         origin_geo: GeoLocation | None = None,
     ):
-        """Evaluate without raising — returns the Verdict object.
+        """Evaluate without raising, returns the Verdict object.
 
         Use this when you want to handle the verdict yourself
         rather than using exception flow. See ``check_tool_call`` for
@@ -241,7 +241,7 @@ class McpKavachMiddleware:
         """Invalidate locally and fan out via the shared session store.
 
         Local caches are updated immediately. The shared-store write
-        is what makes the invalidation visible to peer replicas —
+        is what makes the invalidation visible to peer replicas,
         their next :meth:`check_tool_call` will see it and raise
         :class:`~kavach.Invalidated`.
         """

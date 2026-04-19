@@ -1,7 +1,7 @@
 # Kavach policies for the support-agent refund scenario.
 #
 # These are the rules the support agent's gate enforces on every tool call.
-# The invariant hard-cap (₹50k) lives in code, not here — policies can be
+# The invariant hard-cap (₹50k) lives in code, not here, policies can be
 # hot-reloaded without rebuilding, invariants cannot.
 
 [[policy]]
@@ -18,7 +18,7 @@ conditions = [
 
 [[policy]]
 name = "read_order_always_ok"
-description = "Agents can always read order data — no rate limit, no time restriction"
+description = "Agents can always read order data, no rate limit, no time restriction"
 effect = "permit"
 priority = 10
 conditions = [

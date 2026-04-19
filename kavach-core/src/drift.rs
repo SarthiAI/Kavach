@@ -9,13 +9,13 @@ use serde::{Deserialize, Serialize};
 /// Signal from a drift detector.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DriftSignal {
-    /// No drift detected — context is coherent.
+    /// No drift detected, context is coherent.
     Stable,
 
-    /// Warning — context is shifting but not yet critical.
+    /// Warning, context is shifting but not yet critical.
     Warning(DriftWarning),
 
-    /// Violation — context has drifted beyond tolerance. Authority should be revoked.
+    /// Violation, context has drifted beyond tolerance. Authority should be revoked.
     Violation(DriftViolation),
 }
 
@@ -56,7 +56,7 @@ pub trait DriftDetector: Send + Sync {
 /// - `Some(km)` (tolerant): if both origin_geo and current geo are available, an IP
 ///   change within `km` becomes a Warning (surfaced, stacks toward the warning-refusal
 ///   threshold), and beyond `km` is a Violation. Fail-closed: if a threshold is set but
-///   either origin_geo or current geo is missing, the change is a Violation — the gate
+///   either origin_geo or current geo is missing, the change is a Violation, the gate
 ///   never silently permits an IP change on unverifiable distance.
 #[derive(Default)]
 pub struct GeoLocationDrift {

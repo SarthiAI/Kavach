@@ -1,6 +1,6 @@
 """Trace runner: walk through 4 key Kavach flows showing every byte of data.
 
-This isn't a test suite — it's a narrated tour. It runs a small number of
+This isn't a test suite, it's a narrated tour. It runs a small number of
 end-to-end operations and dumps every HTTP body, every PermitToken, every
 audit entry, every directory blob to stdout so you can read exactly what
 Kavach moves on the wire.
@@ -44,7 +44,7 @@ import support_agent
 
 # ─── Setup ───────────────────────────────────────────────────────────
 
-logging.basicConfig(level=logging.WARNING)  # tame the service logs — trace output is the focus
+logging.basicConfig(level=logging.WARNING)  # tame the service logs, trace output is the focus
 
 console = Console(width=120)
 
@@ -58,7 +58,7 @@ AUDIT_PATH = STATE_DIR / "audit.jsonl"
 
 
 def hex_preview(b: bytes | list[int], max_show: int = 16) -> str:
-    """Short hex summary — first N bytes + total length."""
+    """Short hex summary, first N bytes + total length."""
     if isinstance(b, list):
         b = bytes(b)
     head = b[:max_show].hex()
@@ -71,7 +71,7 @@ def pretty_json(obj: Any, *, title: str | None = None, truncate_bytes_at: int = 
     """Pretty-print a JSON object with long byte arrays truncated.
 
     Kavach payloads contain 3.3 KB ML-DSA signatures and 1.9 KB verifying
-    keys — dumping them raw swamps the screen. This helper renders them as
+    keys, dumping them raw swamps the screen. This helper renders them as
     `<3293 bytes: a1b2c3...>` strings so the surrounding structure stays
     readable while the presence + size of the data is obvious.
     """
@@ -148,7 +148,7 @@ async def start_server(app, host: str, port: int) -> uvicorn.Server:
 
 
 async def flow_1_happy_path(tc: TracingClient) -> None:
-    heading("FLOW 1 — Happy-path refund")
+    heading("FLOW 1, Happy-path refund")
     console.print(
         "Follow a single legitimate refund from the 'agent decides to issue' "
         "step all the way to the 'payment service processes it' step. Every "
@@ -175,7 +175,7 @@ async def flow_1_happy_path(tc: TracingClient) -> None:
         "The `permit_token` dict is the exact fields the payment service will "
         "need to reconstruct a `PermitToken` and verify it. `signature_hex` is "
         "the JSON-encoded SignedTokenEnvelope (algorithm + ml_dsa_signature + "
-        "ed25519_signature + key_id) — the cryptographic proof."
+        "ed25519_signature + key_id), the cryptographic proof."
     )
 
     sig_hex = data["signature_hex"]
@@ -199,9 +199,9 @@ async def flow_1_happy_path(tc: TracingClient) -> None:
     console.print(
         "Under the hood the payment service did four checks:\n"
         "  (a) permit + signature present\n"
-        "  (b) expires_at > now  (replay guard — application-level)\n"
-        "  (c) action_name == 'issue_refund'  (reuse guard — application-level)\n"
-        "  (d) DirectoryTokenVerifier.verify — looks up the key_id in the signed\n"
+        "  (b) expires_at > now  (replay guard, application-level)\n"
+        "  (c) action_name == 'issue_refund'  (reuse guard, application-level)\n"
+        "  (d) DirectoryTokenVerifier.verify, looks up the key_id in the signed\n"
         "      directory, verifies BOTH ML-DSA-65 and Ed25519 signatures against\n"
         "      the PermitToken's canonical_bytes.\n"
         "Any of these failing would short-circuit to 401 with a specific reason."
@@ -213,7 +213,7 @@ async def flow_1_happy_path(tc: TracingClient) -> None:
 
 
 async def flow_2_forged_signature(tc: TracingClient) -> None:
-    heading("FLOW 2 — Attacker submits a forged signature")
+    heading("FLOW 2, Attacker submits a forged signature")
     console.print(
         "Attacker captures a legit permit, replaces the signature bytes with "
         "zeros, POSTs to payment. Payment rejects at the signature verify step.\n"
@@ -258,7 +258,7 @@ async def flow_2_forged_signature(tc: TracingClient) -> None:
     step(2.4, "Result: 401 with 'invalid permit: verify failed: …' in detail")
     console.print(
         "The DirectoryTokenVerifier tried to JSON-decode the signature bytes "
-        "into a SignedTokenEnvelope — and failed, because `\\x00\\x00\\x00…` "
+        "into a SignedTokenEnvelope, and failed, because `\\x00\\x00\\x00…` "
         "isn't valid JSON. Different byte mutations would fail at different "
         "stages (envelope parse, algorithm mismatch, signature verify); every "
         "path fails closed."
@@ -271,7 +271,7 @@ async def flow_2_forged_signature(tc: TracingClient) -> None:
 async def flow_3_directory_rotation(
     tc: TracingClient, *, directory_path: Path, root_kp: KavachKeyPair, agent_kp: KavachKeyPair
 ) -> None:
-    heading("FLOW 3 — Directory rotation")
+    heading("FLOW 3, Directory rotation")
     console.print(
         "Ops team rotates the agent's signing key. The on-disk signed "
         "directory is rewritten with the new key's bundle; the payment "
@@ -294,9 +294,9 @@ async def flow_3_directory_rotation(
     )
     k1_permit = resp.json()
 
-    step(3.2, "Directory on disk BEFORE rotation — entry is K1's bundle")
+    step(3.2, "Directory on disk BEFORE rotation, entry is K1's bundle")
     before = json.loads(directory_path.read_bytes())
-    # The signed manifest stores bundles_json as a raw JSON string — parse it
+    # The signed manifest stores bundles_json as a raw JSON string, parse it
     # to show what's actually in there.
     before_bundles = json.loads(before["bundles_json"])
     pretty_json(
@@ -333,7 +333,7 @@ async def flow_3_directory_rotation(
         label="reload directory",
     )
 
-    step(3.5, "Replay the K1 permit — verification fails (K1 not in directory)")
+    step(3.5, "Replay the K1 permit, verification fails (K1 not in directory)")
     r = await tc.post(
         f"http://{PAY_HOST}:{PAY_PORT}/payments/refund",
         {
@@ -346,7 +346,7 @@ async def flow_3_directory_rotation(
     )
     assert r.status_code == 401
 
-    step(3.6, "Fresh permit signed with K2 — accepted because K2 is in the new directory")
+    step(3.6, "Fresh permit signed with K2, accepted because K2 is in the new directory")
     signer_k2 = PqTokenSigner.from_keypair_hybrid(k2)
     tok = PermitToken(
         token_id=str(uuid.uuid4()),
@@ -389,7 +389,7 @@ async def flow_3_directory_rotation(
 
 
 async def flow_4_audit_anatomy(tc: TracingClient, *, agent_kp: KavachKeyPair) -> None:
-    heading("FLOW 4 — Audit chain anatomy")
+    heading("FLOW 4, Audit chain anatomy")
     console.print(
         "Every gate decision (Permit AND Refuse) lands in a hash-chained, "
         "signature-bound JSONL log. We export it, show the entry structure, "
@@ -407,14 +407,14 @@ async def flow_4_audit_anatomy(tc: TracingClient, *, agent_kp: KavachKeyPair) ->
     lines = [l for l in chain_bytes.decode().splitlines() if l.strip()]
     console.print(f"[dim]audit.jsonl: {len(lines)} entries, {len(chain_bytes)} bytes[/dim]")
 
-    step(4.2, "Decode entry #0 — show all layers: envelope, signed_payload, inner audit record")
+    step(4.2, "Decode entry #0, show all layers: envelope, signed_payload, inner audit record")
     entry0 = json.loads(lines[0])
-    pretty_json(entry0, title="entry #0 — wire format")
+    pretty_json(entry0, title="entry #0, wire format")
 
     # The signed_payload.data is a byte array; decoding it reveals the human
     # audit record that was signed.
     inner = json.loads(bytes(entry0["signed_payload"]["data"]).decode())
-    pretty_json(inner, title="entry #0 — decoded signed_payload.data (the signed audit record)")
+    pretty_json(inner, title="entry #0, decoded signed_payload.data (the signed audit record)")
 
     step(4.3, "Show the hash chain linkage: entry #1.previous_hash == entry #0.entry_hash")
     if len(lines) >= 2:
@@ -435,10 +435,10 @@ async def flow_4_audit_anatomy(tc: TracingClient, *, agent_kp: KavachKeyPair) ->
                 f"entry_hash={entry['entry_hash'][:16]}…"
             )
 
-    step(4.4, "Clean verify — should succeed")
+    step(4.4, "Clean verify, should succeed")
     try:
         SignedAuditChain.verify_jsonl(chain_bytes, agent_kp.public_keys(), hybrid=True)
-        console.print("[green]  ✓ verify_jsonl clean — every entry signature checks out, every hash links[/green]")
+        console.print("[green]  ✓ verify_jsonl clean, every entry signature checks out, every hash links[/green]")
     except Exception as err:
         console.print(f"[red]  ✗ clean verify unexpectedly failed: {err}[/red]")
 

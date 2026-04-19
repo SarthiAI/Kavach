@@ -1,7 +1,7 @@
 //! Redis-backed session store.
 //!
 //! Stores each session as a JSON blob under `kavach:session:{key}` with a
-//! configurable TTL. Redis handles expiration automatically — the trait's
+//! configurable TTL. Redis handles expiration automatically, the trait's
 //! `cleanup` method is a no-op here because there is nothing for us to do
 //! that Redis' own TTL plumbing doesn't already do better.
 //!
@@ -9,7 +9,7 @@
 //!
 //! The in-memory store's `cleanup(max_age_seconds)` iterates and removes
 //! sessions whose `age()` exceeds the threshold. In Redis we instead set a
-//! TTL at `put` time — so expired sessions vanish on their own schedule, and
+//! TTL at `put` time, so expired sessions vanish on their own schedule, and
 //! `cleanup` has nothing to do. It returns `Ok(0)` and a debug-level log line.
 //!
 //! If the integrator needs a *different* max-age than the one configured at
@@ -28,7 +28,7 @@ const DEFAULT_TTL_SECS: u64 = 86_400;
 /// Redis-backed session store.
 ///
 /// Sessions are serialized as JSON and written with a Redis TTL. Cheap to
-/// clone — the connection manager is internally reference-counted.
+/// clone, the connection manager is internally reference-counted.
 #[derive(Clone)]
 pub struct RedisSessionStore {
     conn: ConnectionManager,
@@ -44,7 +44,7 @@ impl RedisSessionStore {
 
     /// Build a store with a custom TTL (in seconds) applied on every `put`.
     ///
-    /// A TTL of 0 is rejected — Redis treats it as "delete immediately",
+    /// A TTL of 0 is rejected, Redis treats it as "delete immediately",
     /// which would make the store useless.
     pub async fn with_ttl(client: redis::Client, ttl_secs: u64) -> Result<Self, SessionStoreError> {
         if ttl_secs == 0 {
@@ -122,7 +122,7 @@ impl SessionStore for RedisSessionStore {
         let redis_key = Self::key(session_id);
         let mut conn = self.conn.clone();
 
-        // `DEL` returns the number of keys actually removed — not an error if
+        // `DEL` returns the number of keys actually removed, not an error if
         // the key was absent. Idempotency matches the trait contract.
         let _: i64 = conn
             .del(&redis_key)
@@ -136,7 +136,7 @@ impl SessionStore for RedisSessionStore {
         // way to count expirations since the last call, and we won't SCAN the
         // whole keyspace just to produce a number. Return 0 and note it.
         tracing::debug!(
-            "RedisSessionStore::cleanup is a no-op — Redis TTL handles expiration automatically"
+            "RedisSessionStore::cleanup is a no-op, Redis TTL handles expiration automatically"
         );
         Ok(0)
     }

@@ -3,7 +3,7 @@ use crate::evaluator::Evaluator;
 use crate::verdict::{PermitToken, RefuseCode, RefuseReason, Verdict};
 use async_trait::async_trait;
 
-/// A structural invariant — a hard limit that cannot be overridden by policy.
+/// A structural invariant, a hard limit that cannot be overridden by policy.
 ///
 /// Invariants are the last line of defense. Even if identity checks pass,
 /// policy permits, and no drift is detected, an invariant violation still
@@ -28,7 +28,7 @@ pub struct Invariant {
     check: InvariantCheck,
 }
 
-/// The actual check — either a built-in kind or a custom function.
+/// The actual check, either a built-in kind or a custom function.
 #[derive(Clone)]
 enum InvariantCheck {
     /// Maximum value for a numeric parameter.

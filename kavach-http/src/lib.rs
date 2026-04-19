@@ -232,7 +232,7 @@ impl HttpGate {
     /// Honors [`GateConfig::observe_only`]: when the underlying gate is in
     /// observe-only mode, this dispatches to [`Gate::evaluate_observe_only`]
     /// which logs what *would* have been refused but always returns Permit.
-    /// This is the Phase-1-rollout path — log everything, block nothing.
+    /// This is the Phase-1-rollout path, log everything, block nothing.
     pub async fn evaluate(&self, request: &HttpRequest, session: &SessionState) -> Verdict {
         let ctx = to_action_context(request, &self.config, session);
         if self.gate.is_observe_only() {

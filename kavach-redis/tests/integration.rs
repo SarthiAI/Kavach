@@ -2,7 +2,7 @@
 //!
 //! These tests only run when `TEST_REDIS_URL` is set (e.g.,
 //! `TEST_REDIS_URL=redis://127.0.0.1:6379`). Absent the env var, every test
-//! short-circuits to `Ok(())` — contributors without a local Redis don't see
+//! short-circuits to `Ok(())`, contributors without a local Redis don't see
 //! false failures, and CI can opt-in by setting the variable.
 //!
 //! Each test uses a unique key namespace so concurrent runs don't collide.
@@ -32,7 +32,7 @@ macro_rules! require_redis {
         match redis_url() {
             Some(u) => u,
             None => {
-                eprintln!("skipping — TEST_REDIS_URL not set");
+                eprintln!("skipping, TEST_REDIS_URL not set");
                 return;
             }
         }
@@ -84,7 +84,7 @@ async fn rate_limit_same_timestamp_counted_twice() {
     let store = RedisRateLimitStore::from_url(&url).await.unwrap();
     let key = unique_key("test-rl-dup");
 
-    // Two records with identical `at` must both count — the uuid suffix in
+    // Two records with identical `at` must both count, the uuid suffix in
     // the sorted-set member is what makes them distinct.
     store.record(&key, 100).await.unwrap();
     store.record(&key, 100).await.unwrap();
@@ -130,8 +130,8 @@ async fn rate_limit_fails_closed_on_bad_url() {
     )
     .await;
     match result {
-        Err(_) => { /* outer timeout — still a failure from caller's pov */ }
-        Ok(Err(_)) => { /* inner construction error — also good */ }
+        Err(_) => { /* outer timeout, still a failure from caller's pov */ }
+        Ok(Err(_)) => { /* inner construction error, also good */ }
         Ok(Ok(_)) => panic!("dead port must not yield a working store"),
     }
 }
@@ -192,7 +192,7 @@ async fn session_store_delete_is_idempotent() {
 #[tokio::test]
 async fn session_store_ttl_respected() {
     let url = require_redis!();
-    // TTL of 1 second — the session should expire almost immediately.
+    // TTL of 1 second, the session should expire almost immediately.
     let store = RedisSessionStore::from_url_with_ttl(&url, 1)
         .await
         .unwrap();
@@ -221,7 +221,7 @@ async fn session_store_ttl_zero_rejected() {
 async fn session_store_cleanup_is_no_op() {
     let url = require_redis!();
     let store = RedisSessionStore::from_url(&url).await.unwrap();
-    // Always returns Ok(0) — Redis TTL handles expiration.
+    // Always returns Ok(0), Redis TTL handles expiration.
     let removed = store.cleanup(60).await.unwrap();
     assert_eq!(removed, 0);
 }
@@ -238,7 +238,7 @@ async fn broadcaster_publish_then_local_subscriber_receives() {
 
     let mut rx = b.subscribe();
 
-    // Give the bridge a moment to actually SUBSCRIBE before we PUBLISH —
+    // Give the bridge a moment to actually SUBSCRIBE before we PUBLISH,
     // Redis drops messages published before the subscription is active.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -262,7 +262,7 @@ async fn broadcaster_cross_instance_delivery() {
     let url = require_redis!();
     let channel = unique_key("test-inv-cross");
 
-    // Two broadcaster instances sharing a channel — this is the core
+    // Two broadcaster instances sharing a channel, this is the core
     // distributed scenario: node A publishes, node B receives.
     let publisher = RedisInvalidationBroadcaster::from_url(&url, channel.clone())
         .await
@@ -301,14 +301,14 @@ async fn broadcaster_publish_with_no_subscribers_succeeds() {
         reason: "nobody-listening".into(),
         evaluator: "test".into(),
     };
-    // Publishing with nobody subscribed is not an error — the local verdict
+    // Publishing with nobody subscribed is not an error, the local verdict
     // doesn't depend on peers acknowledging.
     b.publish(scope).await.unwrap();
 }
 
 #[tokio::test]
 async fn broadcaster_fails_closed_on_bad_url() {
-    // Bounded timeout — see rate_limit_fails_closed_on_bad_url for rationale.
+    // Bounded timeout, see rate_limit_fails_closed_on_bad_url for rationale.
     let result = timeout(
         Duration::from_secs(3),
         RedisInvalidationBroadcaster::from_url("redis://127.0.0.1:1", "test-inv-bad-url"),

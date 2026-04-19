@@ -39,7 +39,7 @@ jobs:
       - name: cargo fmt --all --check
         run: cargo fmt --all --check
 
-      - name: cargo clippy (strict — warnings fail CI)
+      - name: cargo clippy (strict, warnings fail CI)
         run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   rust-test:

@@ -31,7 +31,7 @@ use zeroize::Zeroize;
 /// A Kavach keypair containing both PQ and classical keys.
 ///
 /// Used for signing verdicts and establishing encrypted channels.
-/// The keypair ID is used for key rotation — services reference
+/// The keypair ID is used for key rotation, services reference
 /// keys by ID, so rotating is just adding a new key and retiring the old one.
 pub struct KavachKeyPair {
     /// Unique key identifier.
@@ -43,28 +43,28 @@ pub struct KavachKeyPair {
     /// When this key expires (None = no expiry).
     pub expires_at: Option<DateTime<Utc>>,
 
-    /// ML-DSA-65 signing key — stored as the 32-byte seed (`xi` in FIPS 204).
+    /// ML-DSA-65 signing key, stored as the 32-byte seed (`xi` in FIPS 204).
     pub ml_dsa_signing_key: Vec<u8>,
 
-    /// ML-DSA-65 verifying key — encoded form.
+    /// ML-DSA-65 verifying key, encoded form.
     pub ml_dsa_verifying_key: Vec<u8>,
 
-    /// ML-KEM-768 decapsulation key — encoded (seed) form.
+    /// ML-KEM-768 decapsulation key, encoded (seed) form.
     pub ml_kem_decapsulation_key: Vec<u8>,
 
-    /// ML-KEM-768 encapsulation key — encoded form.
+    /// ML-KEM-768 encapsulation key, encoded form.
     pub ml_kem_encapsulation_key: Vec<u8>,
 
-    /// Ed25519 signing key — 32-byte seed.
+    /// Ed25519 signing key, 32-byte seed.
     pub ed25519_signing_key: Vec<u8>,
 
-    /// Ed25519 verifying key — 32-byte compressed Edwards point.
+    /// Ed25519 verifying key, 32-byte compressed Edwards point.
     pub ed25519_verifying_key: Vec<u8>,
 
-    /// X25519 static secret — 32 bytes.
+    /// X25519 static secret, 32 bytes.
     pub x25519_secret_key: Vec<u8>,
 
-    /// X25519 public key — 32 bytes.
+    /// X25519 public key, 32 bytes.
     pub x25519_public_key: Vec<u8>,
 }
 
@@ -96,7 +96,7 @@ impl KavachKeyPair {
             .to_vec();
 
         // ── ML-KEM-768 (FIPS 203 KEM) ────────────────────────────────
-        // Derive both keys deterministically from a 64-byte seed — avoids
+        // Derive both keys deterministically from a 64-byte seed, avoids
         // cross-crate RNG trait version issues and keeps secret storage compact.
         let kem_seed_size =
             <<MlKem768 as FromSeed>::SeedSize as hybrid_array::typenum::Unsigned>::USIZE;

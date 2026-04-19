@@ -1,5 +1,5 @@
 /**
- * Kavach कवच — Post-quantum execution boundary enforcement.
+ * Kavach कवच, Post-quantum execution boundary enforcement.
  *
  * All gate evaluation runs in compiled Rust via the native addon.
  * This package provides idiomatic TypeScript wrappers and middleware.
@@ -94,7 +94,7 @@ export interface GateOptions {
   /**
    * Tolerance (km) for `GeoLocationDrift`. When unset, any mid-session
    * IP change is a Violation. When set, an IP change within this distance
-   * downgrades to a Warning — but only when both `currentGeo` and
+   * downgrades to a Warning, but only when both `currentGeo` and
    * `originGeo` carry latitude/longitude. Missing geo with a threshold
    * set fails closed (Violation).
    */
@@ -152,14 +152,14 @@ export function spawnInvalidationListener(
       // Defensive: napi's CalleeHandled strategy surfaces errors in
       // the first arg. Log and swallow so the listener keeps running.
       // eslint-disable-next-line no-console
-      console.error('[kavach] invalidation listener raised — continuing:', err);
+      console.error('[kavach] invalidation listener raised, continuing:', err);
       return;
     }
     try {
       callback(scope);
     } catch (cbErr) {
       // eslint-disable-next-line no-console
-      console.error('[kavach] invalidation callback threw — continuing:', cbErr);
+      console.error('[kavach] invalidation callback threw, continuing:', cbErr);
     }
   });
 }
@@ -203,6 +203,82 @@ export class Gate {
   static fromFile(path: string, options: GateOptions = {}): Gate {
     const content = readFileSync(path, 'utf-8');
     return Gate.fromToml(content, options);
+  }
+
+  /**
+   * Create a gate from a plain JS object matching the policy schema.
+   *
+   * Same vocabulary as the TOML format: top-level `policies` (or `policy`)
+   * is an array of policy objects, each with `name`, `effect`, `conditions`,
+   * optional `description`, optional `priority`. Each condition is an object
+   * with one key naming the variant (`identity_kind`, `param_max`,
+   * `rate_limit`, etc.) and the value carrying the payload.
+   *
+   * Typo'd or unknown field names throw a clear error instead of being
+   * silently dropped (deny_unknown_fields contract from the Rust core).
+   *
+   * @example
+   * ```typescript
+   * const gate = Gate.fromObject({
+   *   policies: [
+   *     { name: 'agent_small_refunds', effect: 'permit',
+   *       conditions: [
+   *         { identity_kind: 'agent' },
+   *         { action: 'issue_refund' },
+   *         { param_max: { field: 'amount', max: 5000 } },
+   *       ] },
+   *   ],
+   * });
+   * ```
+   */
+  static fromObject(policies: Record<string, unknown>, options: GateOptions = {}): Gate {
+    const engine = KavachGate.fromObject(
+      policies,
+      options.invariants?.map(i => ({ name: i.name, field: i.field, maxValue: i.maxValue })),
+      options.observeOnly,
+      options.maxSessionActions,
+      options.enableDrift,
+      options.tokenSigner,
+      options.geoDriftMaxKm,
+      options.broadcaster,
+    );
+    return new Gate(engine);
+  }
+
+  /**
+   * Create a gate from a JSON string carrying the policy schema. Same
+   * vocabulary as `fromObject`. Useful when the policy crosses a wire
+   * boundary (HTTP body, message queue, config service).
+   */
+  static fromJsonString(jsonString: string, options: GateOptions = {}): Gate {
+    const engine = KavachGate.fromJsonString(
+      jsonString,
+      options.invariants?.map(i => ({ name: i.name, field: i.field, maxValue: i.maxValue })),
+      options.observeOnly,
+      options.maxSessionActions,
+      options.enableDrift,
+      options.tokenSigner,
+      options.geoDriftMaxKm,
+      options.broadcaster,
+    );
+    return new Gate(engine);
+  }
+
+  /**
+   * Create a gate from a JSON policy file on disk.
+   */
+  static fromJsonFile(path: string, options: GateOptions = {}): Gate {
+    const engine = KavachGate.fromJsonFile(
+      path,
+      options.invariants?.map(i => ({ name: i.name, field: i.field, maxValue: i.maxValue })),
+      options.observeOnly,
+      options.maxSessionActions,
+      options.enableDrift,
+      options.tokenSigner,
+      options.geoDriftMaxKm,
+      options.broadcaster,
+    );
+    return new Gate(engine);
   }
 
   /**
@@ -277,7 +353,7 @@ export class KavachInvalidated extends Error {
   }
 }
 
-// ─── Re-exports — middleware helpers ─────────────────────────────
+// ─── Re-exports, middleware helpers ─────────────────────────────
 
 export {
   McpKavachMiddleware,

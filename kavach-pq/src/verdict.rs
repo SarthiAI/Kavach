@@ -49,7 +49,7 @@ impl VerdictSigner {
 
     /// Access the inner byte-level signer. Used by [`crate::SecureChannel::send_signed`]
     /// to sign raw byte payloads while sharing the same signing key as
-    /// verdict signing — the sender cannot be forced to keep two
+    /// verdict signing, the sender cannot be forced to keep two
     /// separate keys for the two flows.
     pub fn signer(&self) -> &Signer {
         &self.signer
@@ -122,10 +122,10 @@ impl VerdictVerifier {
         }
         seen.insert(nonce.clone());
 
-        // Prevent unbounded growth (crude LRU — production should use an LRU cache)
+        // Prevent unbounded growth (crude LRU, production should use an LRU cache)
         if seen.len() > self.max_tracked_nonces {
             seen.clear();
-            tracing::warn!("nonce cache cleared — consider increasing max_tracked_nonces");
+            tracing::warn!("nonce cache cleared, consider increasing max_tracked_nonces");
         }
         Ok(())
     }

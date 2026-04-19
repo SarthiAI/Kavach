@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security issues privately — **do not open a public issue**.
+Please report security issues privately. **Do not open a public issue.**
 
 **Email:** `support@sarthiai.com` with subject `[kavach-security] <short description>`.
 
@@ -39,7 +39,7 @@ Anything that causes an action to execute despite the gate returning a non-Permi
 
 ### Signature forgery or downgrade
 - Forging an ML-DSA-65 or Ed25519 signature on a `PermitToken`, `SignedAuditEntry`, or `SignedDirectoryManifest`.
-- Tricking a hybrid verifier into accepting a PQ-only envelope (or vice versa) — the algorithm whitelist must be strict in both directions.
+- Tricking a hybrid verifier into accepting a PQ-only envelope (or vice versa). The algorithm whitelist must be strict in both directions.
 - Any chain of events that causes `DirectoryTokenVerifier` to accept a token whose signing key isn't the one pinned in the directory.
 
 ### Audit chain tamper that verifies
@@ -48,7 +48,7 @@ Modifying, reordering, deleting, or splicing entries in a `SignedAuditChain` (in
 ### SecureChannel compromise
 - Decryption by a recipient other than the one bound in `recipient_key_id` (AAD).
 - Successful replay of a previously-received sealed payload.
-- Cross-context replay — a payload sealed for one `context_id` being accepted under a different `context_id`, or a signed-verdict payload replayed through the signed-bytes verifier (the nonce cache is shared on purpose).
+- Cross-context replay: a payload sealed for one `context_id` being accepted under a different `context_id`, or a signed-verdict payload replayed through the signed-bytes verifier (the nonce cache is shared on purpose).
 
 ### Fail-closed regressions
 Any change that causes Kavach to fail **open** where it previously failed **closed**:
@@ -70,11 +70,11 @@ Nonce reuse, insufficient randomness (including any path that bypasses `getrando
 
 The following are **not** treated as Kavach vulnerabilities:
 
-- **Misconfigured policies** — a permissive `[[policy]]` that lets agents do more than intended is a configuration issue, not a gate bypass.
-- **Leaked keys** — ML-DSA seeds, Ed25519 secret keys, X25519 static secrets, or any other key material exposed by the integrator is not a Kavach bug. Key rotation and storage are the integrator's responsibility.
-- **Denial of service via legitimate load** — rate-limit stores, file watchers, and secure-channel nonce caches have finite capacity; overwhelming them via legitimately-signed traffic is a capacity concern.
+- **Misconfigured policies.** A permissive `[[policy]]` that lets agents do more than intended is a configuration issue, not a gate bypass.
+- **Leaked keys.** ML-DSA seeds, Ed25519 secret keys, X25519 static secrets, or any other key material exposed by the integrator is not a Kavach bug. Key rotation and storage are the integrator's responsibility.
+- **Denial of service via legitimate load.** Rate-limit stores, file watchers, and secure-channel nonce caches have finite capacity; overwhelming them via legitimately-signed traffic is a capacity concern.
 - **Pre-1.0 API changes** that break integrators. These will be noted in release notes but are not security issues.
-- **Dependencies' upstream vulnerabilities** — report those to the respective maintainers. If a transitive CVE meaningfully affects Kavach we will pin or patch, but the underlying issue is not ours.
+- **Dependencies' upstream vulnerabilities.** Report those to the respective maintainers. If a transitive CVE meaningfully affects Kavach we will pin or patch, but the underlying issue is not ours.
 - **Social engineering, phishing, or supply-chain attacks on the integrator's deploy pipeline.**
 - **Theoretical attacks** below published parameter sets for ML-DSA-65 / ML-KEM-768 / Ed25519 / X25519 / ChaCha20-Poly1305.
 
@@ -85,7 +85,7 @@ The following are **not** treated as Kavach vulnerabilities:
 Kavach's design assumes:
 
 1. **An attacker may obtain valid credentials.** Keys leak, API tokens get committed, agents get prompt-injected. The gate must evaluate *context*, not just *possession*.
-2. **The integrator's application code is partially trusted.** It can skip the gate only where Rust's type system allows (i.e., never — `Guarded<A>` has no public constructor).
+2. **The integrator's application code is partially trusted.** It can skip the gate only where Rust's type system allows; in practice this is never, because `Guarded<A>` has no public constructor.
 3. **Evaluators trust each other.** The policy engine, drift detectors, and invariant set are all in-process; a malicious evaluator is outside the threat model.
 4. **Network transport is hostile.** `SecureChannel` assumes the wire is attacker-controlled. All sealed payloads are authenticated; replay is rejected.
 5. **Stores may be distributed and flaky.** `RateLimitStore`, `SessionStore`, `InvalidationBroadcaster`, and `PublicKeyDirectory` are pluggable and may fail. Every error path is documented as fail-closed on the local verdict.
@@ -93,9 +93,9 @@ Kavach's design assumes:
 
 Not in the model:
 
-- **Compromised host** with arbitrary memory access — if the attacker can read process memory, signing keys are exposed and no gate can help.
+- **Compromised host** with arbitrary memory access. If the attacker can read process memory, signing keys are exposed and no gate can help.
 - **Malicious Rust crate in the dependency tree.** Supply-chain integrity is delegated to `cargo` and `cargo-audit`.
-- **Side-channel attacks** on the embedded RustCrypto / dalek primitives. Mitigations there are the upstream crates' responsibility.
+- **Side-channel attacks** on the embedded RustCrypto and dalek primitives. Mitigations there are the upstream crates' responsibility.
 
 ---
 
@@ -118,7 +118,7 @@ ML-DSA and ML-KEM are pinned to release-candidate versions. When stable releases
 
 ## What Kavach does *not* protect against
 
-- **The action itself being wrong.** A Permit verdict means *policy allows this action for this principal in this context*. It does not attest the action's business logic is correct.
+- **The action itself being wrong.** A Permit verdict means *policy allows this action for this principal in this context*. It does not attest that the action's business logic is correct.
 - **Integrator code that leaks the `Guarded<A>` outside its intended scope.** Guarded is move-only and uncloneable, but the integrator can still choose to store a permit and use it later. The gate is at the entrance, not every step.
 - **Policy correctness.** A TOML policy set that permits too much will permit too much. Observe mode (`observe_only = true`) is the intended path for tuning before enforcing.
 

@@ -181,7 +181,7 @@ async fn tolerant_mode_missing_current_geo_fails_closed() {
 
 #[tokio::test]
 async fn tolerant_mode_missing_lat_long_fails_closed() {
-    // geo present but lat/long None — distance_km returns None → violation
+    // geo present but lat/long None, distance_km returns None → violation
     let drift = GeoLocationDrift::with_max_distance_km(100.0);
     let partial = GeoLocation {
         country_code: "US".into(),

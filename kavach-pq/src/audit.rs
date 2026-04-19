@@ -5,7 +5,7 @@
 //! - No entry can be modified after signing (signature breaks)
 //! - No entry can be deleted without breaking the chain
 //! - No entry can be inserted out of order (hash chain breaks)
-//! - No entry can be mixed across modes — the chain is either pure
+//! - No entry can be mixed across modes, the chain is either pure
 //!   PQ-only (ML-DSA-65) or pure hybrid (ML-DSA-65 + Ed25519), never
 //!   both. Verification enforces this, closing the downgrade surface
 //!   where a caller might otherwise verify a hybrid chain with a
@@ -23,7 +23,7 @@ use std::sync::RwLock;
 /// The cryptographic mode a chain was signed under.
 ///
 /// Inferred per-entry from whether the signed payload carries an Ed25519
-/// signature. A chain must be uniformly one mode — mixing is a chain break.
+/// signature. A chain must be uniformly one mode, mixing is a chain break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChainMode {
     /// ML-DSA-65 only.
@@ -94,7 +94,7 @@ pub struct SignedAuditChain {
 }
 
 impl SignedAuditChain {
-    /// Create a new empty chain. The chain's mode is fixed by the signer —
+    /// Create a new empty chain. The chain's mode is fixed by the signer,
     /// swapping signers mid-chain would break verification.
     pub fn new(signer: Signer) -> Self {
         let mode = ChainMode::from_hybrid(signer.is_hybrid());
@@ -175,7 +175,7 @@ impl SignedAuditChain {
 
 /// Inspect a sequence of entries and return the chain's mode.
 ///
-/// - Empty slice returns `Ok(None)` — nothing to infer.
+/// - Empty slice returns `Ok(None)`, nothing to infer.
 /// - All entries must agree on mode; any mix returns an
 ///   [`PqError::AuditChainBroken`] naming the first inconsistent index.
 pub fn detect_mode(entries: &[SignedAuditEntry]) -> Result<Option<ChainMode>> {
@@ -207,7 +207,7 @@ pub fn detect_mode(entries: &[SignedAuditEntry]) -> Result<Option<ChainMode>> {
 ///    a hybrid verifier cannot accept a PQ-only chain)
 /// 3. Every signature is valid
 /// 4. Every hash chain link is correct
-/// 5. Indices are sequential — no gaps or duplicates
+/// 5. Indices are sequential, no gaps or duplicates
 pub fn verify_chain(entries: &[SignedAuditEntry], verifier: &Verifier) -> Result<()> {
     // Determine chain mode and enforce verifier parity before any crypto work.
     let chain_mode = detect_mode(entries)?;
@@ -286,7 +286,7 @@ pub fn export_jsonl(entries: &[SignedAuditEntry]) -> Result<Vec<u8>> {
 ///
 /// Blank lines are skipped. Parse errors report the 0-based entry index
 /// (count of successfully parsed entries *before* the failure), which is
-/// what verifiers care about — not the raw line number.
+/// what verifiers care about, not the raw line number.
 pub fn parse_jsonl(data: &[u8]) -> Result<Vec<SignedAuditEntry>> {
     let mut entries: Vec<SignedAuditEntry> = Vec::new();
     for line in data.split(|b| *b == b'\n') {
@@ -304,8 +304,8 @@ pub fn parse_jsonl(data: &[u8]) -> Result<Vec<SignedAuditEntry>> {
 /// Compute the SHA-256 hash for a chain entry.
 ///
 /// Binds together the index, previous-entry hash, and the full signed payload
-/// (data + ML-DSA signature + Ed25519 signature if present). Any mutation —
-/// reordering, insertion, deletion, or tampering — breaks the chain.
+/// (data + ML-DSA signature + Ed25519 signature if present). Any mutation,
+/// reordering, insertion, deletion, or tampering, breaks the chain.
 fn compute_chain_hash(index: u64, previous_hash: &str, payload: &SignedPayload) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();

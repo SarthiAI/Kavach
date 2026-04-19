@@ -13,7 +13,7 @@
  *   npm run build
  *   node --loader ts-node/esm tests/smoke_test.ts
  *
- * We don't want to pull ts-node as a dep — compile to dist/ then run the .js.
+ * We don't want to pull ts-node as a dep, compile to dist/ then run the .js.
  */
 
 import {
@@ -49,7 +49,7 @@ function check(name: string, cond: boolean, detail = ''): void {
   total += 1;
   if (cond) passed += 1;
   const mark = cond ? PASS : FAIL;
-  const tail = detail ? ` — ${detail}` : '';
+  const tail = detail ? `, ${detail}` : '';
   console.log(`  ${mark} ${name}${tail}`);
 }
 
@@ -235,7 +235,7 @@ try {
 }
 check('error raised on bad TOML', tomlErr);
 
-// ─── 8. PqTokenSigner — sign/verify roundtrip + tamper detection ───────
+// ─── 8. PqTokenSigner, sign/verify roundtrip + tamper detection ───────
 
 section('[8] PqTokenSigner sign/verify (PQ-only + hybrid)');
 
@@ -275,7 +275,7 @@ try {
 }
 check('PQ-only verify(tampered sig) throws', tamperRejected);
 
-// Tamper token (action_name) — sig was for "issue_refund"
+// Tamper token (action_name), sig was for "issue_refund"
 let tokenTamperRejected = false;
 try {
   pq.verify({ ...baseToken, actionName: 'delete_customer' }, sig);
@@ -397,9 +397,9 @@ if (pt && signedVerdict.signature) {
   check('forged action_name rejected by verify', forgeRejected);
 }
 
-// ─── 10. Gate.reload — hot policy swap + parse-error fail-safe ─────────
+// ─── 10. Gate.reload, hot policy swap + parse-error fail-safe ─────────
 
-section('[10] Gate.reload — hot policy swap');
+section('[10] Gate.reload, hot policy swap');
 
 const reloadPermissive = `
 [[policy]]
@@ -463,7 +463,7 @@ check('mlKemEncapsulationKey non-empty',
 const otherKp = KavachKeyPair.generate();
 check('two generations produce distinct ids', kp.id !== otherKp.id);
 
-// from_keypair_pq_only — sign + verify roundtrip via bundle's VK
+// from_keypair_pq_only, sign + verify roundtrip via bundle's VK
 const kpSigner = PqTokenSigner.fromKeypairPqOnly(kp);
 check('fromKeypairPqOnly forwards kp.id',
   kpSigner.keyId === kp.id && kpSigner.isHybrid === false);
@@ -516,7 +516,7 @@ async function runExpiryCheck(): Promise<void> {
   check('short-lived kp expired after 1.5s', shortKp.isExpired === true);
 }
 
-// ─── 12. SignedAuditChain — append/verify/export/tamper detection ──────
+// ─── 12. SignedAuditChain, append/verify/export/tamper detection ──────
 
 section('[12] SignedAuditChain append + verify + export + tamper detection');
 
@@ -557,7 +557,7 @@ check('exportJsonl has 3 lines', lineCount === 3);
 const verifiedN = SignedAuditChain.verifyJsonl(blob, auditBundle, true);
 check('verifyJsonl(hybrid=true) returns 3', verifiedN === 3);
 
-// Mode inference — omit the hybrid flag.
+// Mode inference, omit the hybrid flag.
 const inferredN = SignedAuditChain.verifyJsonl(blob, auditBundle);
 check('verifyJsonl without hybrid infers hybrid', inferredN === 3);
 
@@ -582,7 +582,7 @@ try {
 }
 check('wrong-key bundle → verifyJsonl throws', auditWrongKeyRejected);
 
-// PQ-only verifier on a hybrid chain MUST be rejected — downgrade defense.
+// PQ-only verifier on a hybrid chain MUST be rejected, downgrade defense.
 let chainDowngradeRejected = false;
 try {
   SignedAuditChain.verifyJsonl(blob, auditBundle, false);
@@ -635,7 +635,7 @@ try {
 }
 check('empty chain verifies', emptyOk);
 
-// ─── 13. SecureChannel — hybrid encrypt + sign + replay + context binding ──
+// ─── 13. SecureChannel, hybrid encrypt + sign + replay + context binding ──
 
 section('[13] SecureChannel send/receive + replay + tamper + context binding');
 
@@ -784,7 +784,7 @@ check('remove existing returns true', dirIm.remove(kpC.id) === true);
 check('remove missing returns false', dirIm.remove(kpC.id) === false);
 check('after remove length === 2', dirIm.length === 2);
 
-// DirectoryTokenVerifier — hybrid/valid
+// DirectoryTokenVerifier, hybrid/valid
 const verifier = new DirectoryTokenVerifier(dirIm, true);
 let dirValidOk = false;
 try {
@@ -1029,7 +1029,7 @@ const vTolerant = tolerantGate.evaluate({
 });
 check('tolerant: matching ip+geo still permits', vTolerant.isPermit);
 
-// Geo plumbing — ensure ActionContext accepts geo fields without crashing
+// Geo plumbing, ensure ActionContext accepts geo fields without crashing
 const vGeoPlumb = tolerantGate.evaluate({
   principalId: 'alice',
   principalKind: 'user',
@@ -1099,7 +1099,7 @@ const vHttpExplicit = geoHttp.evaluate({
 });
 check('HTTP middleware: explicit geo overrides resolver', vHttpExplicit !== null);
 
-// Distance sanity check via core — passing geo with no lat/lon still
+// Distance sanity check via core, passing geo with no lat/lon still
 // evaluates cleanly (SDK must not assume lat/lon are present).
 const vNoCoords = tolerantGate.evaluate({
   principalId: 'alice',
@@ -1323,7 +1323,7 @@ async function runBroadcasterTests(): Promise<void> {
   bc.publish('principal', 'agent-alpha', 'key rotation', 'manual');
   bc.publish('role', 'admin', 'org-wide revoke');
 
-  // Listener runs on the event loop — wait briefly for the async fan-out.
+  // Listener runs on the event loop, wait briefly for the async fan-out.
   await new Promise(r => setTimeout(r, 150));
 
   check('broadcaster: listener received exactly 3 scopes', received.length === 3,
@@ -1395,6 +1395,521 @@ conditions = [ { action = "data.read" } ]
   }
   check('broadcaster: session publish rejects non-UUID targetId', uuidRejected);
 }
+
+// ─── 20. Format equivalence: TOML, object, JSON file ───────────────────
+
+section('[20] Format equivalence: TOML, object, JSON file');
+
+const equivObj = {
+  policies: [
+    {
+      name: 'support_role_refunds',
+      effect: 'permit',
+      priority: 10,
+      conditions: [
+        { identity_role: 'support' },
+        { action: 'refund.issue' },
+        { param_max: { field: 'amount', max: 5000.0 } },
+        { param_min: { field: 'amount', min: 1.0 } },
+        { rate_limit: { max: 50, window: '24h' } },
+        { session_age_max: '4h' },
+      ],
+    },
+    {
+      name: 'agent_kind_reads',
+      effect: 'permit',
+      priority: 20,
+      conditions: [
+        { identity_kind: 'agent' },
+        { action: 'report.fetch' },
+        { param_in: { field: 'region', values: ['IN', 'US', 'EU'] } },
+      ],
+    },
+    {
+      name: 'payment_service_id',
+      effect: 'permit',
+      priority: 30,
+      conditions: [
+        { identity_id: 'payment-service' },
+        { action: 'refund.process' },
+        { resource: 'orders/*' },
+      ],
+    },
+  ],
+};
+
+function renderEquivToml(obj: typeof equivObj): string {
+  const lines: string[] = [];
+  for (const p of obj.policies) {
+    lines.push('[[policy]]');
+    lines.push(`name = "${p.name}"`);
+    lines.push(`effect = "${p.effect}"`);
+    if ('priority' in p) lines.push(`priority = ${p.priority}`);
+    const condLines = p.conditions.map(c => '    ' + tomlCond(c));
+    lines.push('conditions = [');
+    lines.push(condLines.join(',\n'));
+    lines.push(']', '');
+  }
+  return lines.join('\n');
+}
+
+function tomlCond(c: Record<string, unknown>): string {
+  const [k, v] = Object.entries(c)[0];
+  if (typeof v === 'string') return `{ ${k} = "${v}" }`;
+  if (v && typeof v === 'object') {
+    const inner: string[] = [];
+    for (const [ik, iv] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof iv === 'string') inner.push(`${ik} = "${iv}"`);
+      else if (Array.isArray(iv)) inner.push(`${ik} = [${iv.map(x => `"${x}"`).join(', ')}]`);
+      else inner.push(`${ik} = ${iv}`);
+    }
+    return `{ ${k} = { ${inner.join(', ')} } }`;
+  }
+  return `{ ${k} = ${v} }`;
+}
+
+const equivTmp = mkdtempSync(join(tmpdir(), 'kavach-p06-'));
+const equivJsonPath = join(equivTmp, 'policies.json');
+writeFileSync(equivJsonPath, JSON.stringify(equivObj));
+
+const equivToml = renderEquivToml(equivObj);
+const gToml = Gate.fromToml(equivToml);
+const gObj = Gate.fromObject(equivObj);
+const gJsonStr = Gate.fromJsonString(JSON.stringify(equivObj));
+const gJsonFile = Gate.fromJsonFile(equivJsonPath);
+
+check('equiv: all four loaders agree on evaluator_count',
+  gToml.evaluatorCount === gObj.evaluatorCount &&
+  gObj.evaluatorCount === gJsonStr.evaluatorCount &&
+  gJsonStr.evaluatorCount === gJsonFile.evaluatorCount,
+  `count=${gToml.evaluatorCount}`);
+
+const equivCases: Array<[string, Parameters<typeof gToml.evaluate>[0], 'PERMIT' | 'REFUSE']> = [
+  ['support refund $500 within cap',
+    { principalId: 'alice', principalKind: 'user', actionName: 'refund.issue',
+      roles: ['support'], params: { amount: 500.0 } }, 'PERMIT'],
+  ['support refund $9000 over cap',
+    { principalId: 'alice', principalKind: 'user', actionName: 'refund.issue',
+      roles: ['support'], params: { amount: 9000.0 } }, 'REFUSE'],
+  ['payment-service processes orders/abc',
+    { principalId: 'payment-service', principalKind: 'service',
+      actionName: 'refund.process', resource: 'orders/abc' }, 'PERMIT'],
+  ['payment-service wrong resource',
+    { principalId: 'payment-service', principalKind: 'service',
+      actionName: 'refund.process', resource: 'users/abc' }, 'REFUSE'],
+  ['unknown action default-deny',
+    { principalId: 'alice', principalKind: 'user', actionName: 'some_unknown',
+      roles: ['support'] }, 'REFUSE'],
+];
+
+for (const [label, ctx, expected] of equivCases) {
+  const outcomes = [gToml.evaluate(ctx), gObj.evaluate(ctx),
+                    gJsonStr.evaluate(ctx), gJsonFile.evaluate(ctx)]
+    .map(v => v.isPermit ? 'PERMIT' : 'REFUSE');
+  const allAgree = outcomes.every(o => o === outcomes[0]);
+  const matchesExpected = outcomes[0] === expected;
+  check(`equiv: ${label} - all loaders agree`, allAgree, `outcomes=${outcomes.join(',')}`);
+  check(`equiv: ${label} - matches expected ${expected}`, matchesExpected);
+}
+
+// Singular 'policy' alias on object/JSON loaders for TOML compatibility.
+const singObj = Gate.fromObject({ policy: equivObj.policies });
+const singCtx = { principalId: 'alice', principalKind: 'user' as const,
+  actionName: 'refund.issue', roles: ['support'], params: { amount: 500 } };
+check('equiv: singular `policy` alias accepted by fromObject',
+  singObj.evaluate(singCtx).isPermit);
+
+// Empty policy default-denies across loaders.
+check('equiv: empty TOML default-denies', Gate.fromToml('').evaluate(singCtx).isRefuse);
+check('equiv: empty object default-denies',
+  Gate.fromObject({ policies: [] }).evaluate(singCtx).isRefuse);
+check('equiv: empty JSON default-denies',
+  Gate.fromJsonString('{"policies":[]}').evaluate(singCtx).isRefuse);
+
+unlinkSync(equivJsonPath);
+
+// ─── 21. Adversarial inputs across loaders ─────────────────────────────
+
+section('[21] Adversarial inputs must error loudly across loaders');
+
+function expectThrows(label: string, fn: () => void): void {
+  let threw = false;
+  let msg = '';
+  try { fn(); } catch (e) { threw = true; msg = (e as Error).message.slice(0, 80); }
+  check(label, threw, threw ? `msg=${msg}` : 'no error raised');
+}
+
+// Typo'd top-level wrapper.
+expectThrows('object: typo "polciies" raises',
+  () => Gate.fromObject({ polciies: [] }));
+expectThrows('json: typo "polciies" raises',
+  () => Gate.fromJsonString(JSON.stringify({ polciies: [] })));
+
+// Typo'd policy field.
+expectThrows('object: typo "naem" raises',
+  () => Gate.fromObject({ policies: [{ naem: 'x', effect: 'permit', conditions: [] }] }));
+expectThrows('object: typo "efect" raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', efect: 'permit', conditions: [] }] }));
+
+// Typo'd condition variant.
+expectThrows('object: typo "idnetity_kind" raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', effect: 'permit',
+    conditions: [{ idnetity_kind: 'agent' }] }] }));
+expectThrows('object: typo "param_mac" raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', effect: 'permit',
+    conditions: [{ param_mac: { field: 'amount', max: 5000.0 } }] }] }));
+expectThrows('object: typo "rate_lmit" raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', effect: 'permit',
+    conditions: [{ rate_lmit: { max: 50, window: '24h' } }] }] }));
+
+// Typo'd nested payload field.
+expectThrows('object: param_max.feld typo raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', effect: 'permit',
+    conditions: [{ param_max: { feld: 'amount', max: 5000.0 } }] }] }));
+
+// Missing required.
+expectThrows('object: missing effect raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', conditions: [] }] }));
+expectThrows('object: missing name raises',
+  () => Gate.fromObject({ policies: [{ effect: 'permit', conditions: [] }] }));
+expectThrows('object: missing conditions raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', effect: 'permit' }] }));
+
+// Invalid enum.
+expectThrows('object: identity_kind="Robot" raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', effect: 'permit',
+    conditions: [{ identity_kind: 'Robot' }] }] }));
+expectThrows('object: effect="Maybe" raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', effect: 'Maybe', conditions: [] }] }));
+
+// Wrong type.
+expectThrows('object: priority="high" raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', effect: 'permit',
+    conditions: [], priority: 'high' as unknown as number }] }));
+expectThrows('object: param_in.values=str raises',
+  () => Gate.fromObject({ policies: [{ name: 'x', effect: 'permit',
+    conditions: [{ param_in: { field: 'r', values: 'IN' } }] }] }));
+
+// TOML adversarial parity (deny_unknown_fields applies there too).
+expectThrows('toml: typo "idnetity_kind" raises',
+  () => Gate.fromToml(`[[policy]]
+name = "x"
+effect = "permit"
+conditions = [
+    { idnetity_kind = "agent" },
+]`));
+
+// Intentional edges that must NOT throw.
+const openObj = Gate.fromObject({ policies: [{ name: 'open', effect: 'permit', conditions: [] }] });
+check('object: empty conditions matches any action',
+  openObj.evaluate({ principalId: 'x', principalKind: 'user', actionName: 'anything' }).isPermit);
+
+const intMaxObj = Gate.fromObject({ policies: [{ name: 'x', effect: 'permit',
+  conditions: [{ action: 'buy' }, { param_max: { field: 'qty', max: 100 } }] }] });
+check('object: int max coerces to f64',
+  intMaxObj.evaluate({ principalId: 'x', principalKind: 'user', actionName: 'buy',
+    params: { qty: 50 } }).isPermit);
+
+// ─── 22. Generated-policy equivalence ──────────────────────────────────
+
+section('[22] Generated-policy equivalence (60 random policies x 5 contexts)');
+
+function gen22Condition(rng: () => number): Record<string, unknown> {
+  const variants = ['identity_role', 'identity_kind', 'identity_id', 'action',
+    'param_max', 'param_min', 'rate_limit', 'session_age_max'];
+  const kind = variants[Math.floor(rng() * variants.length)];
+  const roles = ['support', 'admin', 'engineer'];
+  const kinds = ['user', 'agent', 'service', 'scheduler', 'external'];
+  const ids = ['alice', 'bob', 'payment-service'];
+  const actions = ['refund.issue', 'report.fetch', 'delete', 'ping'];
+  const fields = ['amount', 'qty', 'limit'];
+  switch (kind) {
+    case 'identity_role': return { identity_role: roles[Math.floor(rng() * roles.length)] };
+    case 'identity_kind': return { identity_kind: kinds[Math.floor(rng() * kinds.length)] };
+    case 'identity_id': return { identity_id: ids[Math.floor(rng() * ids.length)] };
+    case 'action': return { action: actions[Math.floor(rng() * actions.length)] };
+    case 'param_max': return { param_max: {
+      field: fields[Math.floor(rng() * fields.length)],
+      max: [100, 500, 1000, 5000, 10000][Math.floor(rng() * 5)] }};
+    case 'param_min': return { param_min: {
+      field: fields[Math.floor(rng() * fields.length)],
+      min: [1, 10, 50, 100][Math.floor(rng() * 4)] }};
+    case 'rate_limit': return { rate_limit: {
+      max: [5, 10, 50, 100][Math.floor(rng() * 4)],
+      window: ['1h', '24h', '30m', '60s'][Math.floor(rng() * 4)] }};
+    default: return { session_age_max: ['30m', '1h', '4h', '24h'][Math.floor(rng() * 4)] };
+  }
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const rng = mulberry32(20260419);
+let evals = 0;
+let diverges = 0;
+
+for (let i = 0; i < 60; i++) {
+  const nCond = 1 + Math.floor(rng() * 4);
+  const policy = {
+    name: `gen_${i}`,
+    effect: rng() < 0.5 ? 'permit' : 'refuse',
+    priority: 1 + Math.floor(rng() * 200),
+    conditions: Array.from({ length: nCond }, () => gen22Condition(rng)),
+  };
+  const obj = { policies: [policy] };
+  let g1, g2, g3;
+  try {
+    g1 = Gate.fromToml(renderEquivToml(obj as typeof equivObj));
+    g2 = Gate.fromObject(obj);
+    g3 = Gate.fromJsonString(JSON.stringify(obj));
+  } catch {
+    diverges += 1;
+    continue;
+  }
+  for (let j = 0; j < 5; j++) {
+    const params: Record<string, number> = {};
+    if (rng() < 0.7) {
+      params.amount = [10, 50, 200, 800, 3000, 7500, 15000][Math.floor(rng() * 7)];
+    }
+    const ctx = {
+      principalId: ['alice', 'bob', 'payment-service'][Math.floor(rng() * 3)],
+      principalKind: (['user', 'agent', 'service', 'scheduler', 'external'][Math.floor(rng() * 5)]) as
+        'user' | 'agent' | 'service' | 'scheduler' | 'external',
+      actionName: ['refund.issue', 'report.fetch', 'delete', 'ping'][Math.floor(rng() * 4)],
+      roles: rng() < 0.6 ? [['support', 'admin', 'engineer'][Math.floor(rng() * 3)]] : [],
+      params,
+    };
+    const o1 = g1.evaluate(ctx);
+    const o2 = g2.evaluate(ctx);
+    const o3 = g3.evaluate(ctx);
+    evals += 1;
+    const k = (v: typeof o1) => v.isPermit ? 'P' : v.isRefuse ? `R/${v.code}` : 'I';
+    const a = k(o1), b = k(o2), c = k(o3);
+    if (a !== b || b !== c) {
+      diverges += 1;
+      if (diverges <= 3) console.log(`    divergence: policy=${i} ctx=${j} toml=${a} obj=${b} json=${c}`);
+    }
+  }
+}
+
+check(`generated: zero divergences across ${evals} evaluations`, diverges === 0,
+  `evals=${evals} diverges=${diverges}`);
+check('generated: all 60 policies built across all loaders', evals === 300,
+  `actual=${evals}`);
+
+// ─── 23. kwargs, reload, JSON failures, numeric edges ─────────────────
+
+section('[23] kwargs equivalence + reload + JSON failures + numeric edges');
+
+const policyObj23 = {
+  policies: [
+    {
+      name: 'agent_small_refunds',
+      effect: 'permit',
+      conditions: [
+        { identity_kind: 'agent' },
+        { action: 'issue_refund' },
+        { param_max: { field: 'amount', max: 5000.0 } },
+      ],
+    },
+  ],
+};
+
+const policyToml23 = `
+[[policy]]
+name = "agent_small_refunds"
+effect = "permit"
+conditions = [
+    { identity_kind = "agent" },
+    { action = "issue_refund" },
+    { param_max = { field = "amount", max = 5000.0 } },
+]
+`;
+
+const ctxOver23 = {
+  principalId: 'bot', principalKind: 'agent' as const,
+  actionName: 'issue_refund', params: { amount: 50_000 },
+};
+const ctxPermit23 = {
+  principalId: 'bot', principalKind: 'agent' as const,
+  actionName: 'issue_refund', params: { amount: 500 },
+};
+
+// A. invariants on every loader
+const invOpts = { invariants: [{ name: 'hard_cap', field: 'amount', maxValue: 10_000 }] };
+const tmpDir23 = mkdtempSync(join(tmpdir(), 'kavach-p06-s23-'));
+const jsonPath23 = join(tmpDir23, 'p.json');
+writeFileSync(jsonPath23, JSON.stringify(policyObj23));
+
+const allRefuseOnInv = [
+  Gate.fromToml(policyToml23, invOpts).evaluate(ctxOver23).isRefuse,
+  Gate.fromObject(policyObj23, invOpts).evaluate(ctxOver23).isRefuse,
+  Gate.fromJsonString(JSON.stringify(policyObj23), invOpts).evaluate(ctxOver23).isRefuse,
+  Gate.fromJsonFile(jsonPath23, invOpts).evaluate(ctxOver23).isRefuse,
+].every(b => b);
+check('kwarg invariants: all four loaders refuse over-cap', allRefuseOnInv);
+
+// A. observeOnly flips refuse to permit on every loader
+const allPermitOnObserve = [
+  Gate.fromToml(policyToml23, { observeOnly: true }).evaluate(ctxOver23).isPermit,
+  Gate.fromObject(policyObj23, { observeOnly: true }).evaluate(ctxOver23).isPermit,
+  Gate.fromJsonString(JSON.stringify(policyObj23), { observeOnly: true }).evaluate(ctxOver23).isPermit,
+  Gate.fromJsonFile(jsonPath23, { observeOnly: true }).evaluate(ctxOver23).isPermit,
+].every(b => b);
+check('kwarg observeOnly: all four loaders permit', allPermitOnObserve);
+
+// A. enableDrift=false drops evaluator_count by 1 on every loader
+const dropPairs = [
+  [Gate.fromToml(policyToml23).evaluatorCount,
+    Gate.fromToml(policyToml23, { enableDrift: false }).evaluatorCount],
+  [Gate.fromObject(policyObj23).evaluatorCount,
+    Gate.fromObject(policyObj23, { enableDrift: false }).evaluatorCount],
+  [Gate.fromJsonString(JSON.stringify(policyObj23)).evaluatorCount,
+    Gate.fromJsonString(JSON.stringify(policyObj23), { enableDrift: false }).evaluatorCount],
+];
+const allDrop = dropPairs.every(([d, e]) => e === d - 1);
+check('kwarg enableDrift=false: evaluator_count drops uniformly', allDrop);
+
+// A. geoDriftMaxKm: construction succeeds across loaders
+const geoOk = [
+  Gate.fromToml(policyToml23, { geoDriftMaxKm: 500 }).evaluate(ctxPermit23).isPermit,
+  Gate.fromObject(policyObj23, { geoDriftMaxKm: 500 }).evaluate(ctxPermit23).isPermit,
+  Gate.fromJsonFile(jsonPath23, { geoDriftMaxKm: 500 }).evaluate(ctxPermit23).isPermit,
+].every(b => b);
+check('kwarg geoDriftMaxKm: construction works on every loader', geoOk);
+
+// A. tokenSigner emits signature on every loader
+const signer23 = PqTokenSigner.generateHybrid();
+const signedGates = [
+  Gate.fromToml(policyToml23, { tokenSigner: signer23 }),
+  Gate.fromObject(policyObj23, { tokenSigner: signer23 }),
+  Gate.fromJsonString(JSON.stringify(policyObj23), { tokenSigner: signer23 }),
+  Gate.fromJsonFile(jsonPath23, { tokenSigner: signer23 }),
+];
+const allSigned = signedGates.every(g => {
+  const v = g.evaluate(ctxPermit23);
+  return v.isPermit && !!v.permitToken && !!v.permitToken.signature && v.permitToken.signature.length > 0;
+});
+check('kwarg tokenSigner: every loader yields a signed PermitToken', allSigned);
+
+// B. gate.reload(toml) after non-TOML construction
+const gReload = Gate.fromObject(policyObj23);
+check('object-built gate permits 500 before reload', gReload.evaluate(ctxPermit23).isPermit);
+const stricterToml = `
+[[policy]]
+name = "tighter"
+effect = "permit"
+conditions = [
+    { identity_kind = "agent" },
+    { action = "issue_refund" },
+    { param_max = { field = "amount", max = 100.0 } },
+]
+`;
+gReload.reload(stricterToml);
+check('object-built gate refuses 500 after reload to max=100',
+  gReload.evaluate(ctxPermit23).isRefuse);
+const ctxPermit50 = {
+  principalId: 'bot', principalKind: 'agent' as const,
+  actionName: 'issue_refund', params: { amount: 50 },
+};
+check('object-built gate still permits 50 after reload',
+  gReload.evaluate(ctxPermit50).isPermit);
+
+// Reload from JSON-file-built gate too
+const gReloadJson = Gate.fromJsonFile(jsonPath23);
+check('JSON-file-built gate permits 500 before reload',
+  gReloadJson.evaluate(ctxPermit23).isPermit);
+gReloadJson.reload(stricterToml);
+check('JSON-file-built gate refuses 500 after reload',
+  gReloadJson.evaluate(ctxPermit23).isRefuse);
+
+// Bad reload preserves previous good policy
+const gReload3 = Gate.fromObject(policyObj23);
+let badReloadThrew = false;
+try { gReload3.reload('this is { not valid toml'); } catch { badReloadThrew = true; }
+check('reload with malformed TOML throws', badReloadThrew);
+check('after failed reload, object-built gate still permits',
+  gReload3.evaluate(ctxPermit23).isPermit);
+
+// C. JSON file failure modes
+let nonExistentThrew = false;
+try { Gate.fromJsonFile('/nonexistent/path/kavach.json'); } catch { nonExistentThrew = true; }
+check('fromJsonFile: non-existent path throws', nonExistentThrew);
+
+const malformedPath = join(tmpDir23, 'bad.json');
+writeFileSync(malformedPath, '{ this is not valid json');
+let malformedThrew = false;
+try { Gate.fromJsonFile(malformedPath); } catch { malformedThrew = true; }
+check('fromJsonFile: malformed JSON throws', malformedThrew);
+
+const emptyPath = join(tmpDir23, 'empty.json');
+writeFileSync(emptyPath, '');
+let emptyThrew = false;
+try { Gate.fromJsonFile(emptyPath); } catch { emptyThrew = true; }
+check('fromJsonFile: empty file throws', emptyThrew);
+
+const wsPath = join(tmpDir23, 'ws.json');
+writeFileSync(wsPath, JSON.stringify(policyObj23) + '\n\n   \n');
+const gWs = Gate.fromJsonFile(wsPath);
+check('fromJsonFile: trailing whitespace tolerated', gWs.evaluate(ctxPermit23).isPermit);
+
+// D. Numeric edges
+const zeroMaxObj = { policies: [{
+  name: 'zero', effect: 'permit', conditions: [
+    { action: 'buy' },
+    { param_max: { field: 'qty', max: 0 } },
+  ],
+}]};
+const gZero = Gate.fromObject(zeroMaxObj);
+check('param_max max=0: qty=0 permits', gZero.evaluate({
+  principalId: 'x', principalKind: 'user', actionName: 'buy', params: { qty: 0 },
+}).isPermit);
+check('param_max max=0: qty=1 refuses', gZero.evaluate({
+  principalId: 'x', principalKind: 'user', actionName: 'buy', params: { qty: 1 },
+}).isRefuse);
+
+const zeroRateObj = { policies: [{
+  name: 'zero_rate', effect: 'permit', conditions: [
+    { action: 'buy' },
+    { rate_limit: { max: 0, window: '1h' } },
+  ],
+}]};
+const gZr = Gate.fromObject(zeroRateObj);
+check('rate_limit max=0 refuses any call', gZr.evaluate({
+  principalId: 'y', principalKind: 'user', actionName: 'buy',
+}).isRefuse);
+
+// E. Combined feature smoke
+const gCombo = Gate.fromObject(policyObj23, {
+  invariants: [{ name: 'hard_cap', field: 'amount', maxValue: 10_000 }],
+  tokenSigner: signer23,
+});
+const v1 = gCombo.evaluate(ctxPermit23);
+check('combo: object-built signed gate permits 500', v1.isPermit);
+check('combo: object-built signed gate emits a signature',
+  !!v1.permitToken && !!v1.permitToken.signature && v1.permitToken.signature.length > 0);
+
+gCombo.reload(stricterToml);
+check('combo: after reload, same gate refuses 500',
+  gCombo.evaluate(ctxPermit23).isRefuse);
+const v3 = gCombo.evaluate(ctxPermit50);
+check('combo: after reload, same gate still emits signed permits for valid amounts',
+  v3.isPermit && !!v3.permitToken && !!v3.permitToken.signature);
+check('combo: invariant + reload composed correctly (refuse huge amount)',
+  gCombo.evaluate(ctxOver23).isRefuse);
+
+// Cleanup tmp files
+unlinkSync(jsonPath23);
+unlinkSync(malformedPath);
+unlinkSync(emptyPath);
+unlinkSync(wsPath);
 
 // ─── Run and report ────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@
 //! Every action passes through a [`Gate`] that evaluates identity, policy,
 //! drift, and invariants before producing a [`Verdict`].
 //!
-//! The key type is [`Guarded<A>`] — a wrapper around an action that can only
+//! The key type is [`Guarded<A>`], a wrapper around an action that can only
 //! be constructed by the gate, and can only be executed by consuming the wrapper.
 //! Rust's type system makes it a **compile error** to skip the gate.
 //!

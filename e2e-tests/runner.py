@@ -1,7 +1,7 @@
 """End-to-end runner for the Kavach refund scenario.
 
 Spins both services up as in-process uvicorn servers, runs 15 scenarios,
-reports a pass/fail table at the end. Every step — agent, payment, audit —
+reports a pass/fail table at the end. Every step, agent, payment, audit,
 logs to the same stream with a per-service tag so you can read the flow
 top to bottom.
 
@@ -48,7 +48,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
-# Uvicorn is noisy by default — tone its access logs down since we do our
+# Uvicorn is noisy by default, tone its access logs down since we do our
 # own per-request logging inside the services.
 for noisy in ("uvicorn", "uvicorn.access", "uvicorn.error"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
@@ -147,7 +147,7 @@ async def post_refund(
 def record(ctx: RunCtx, num: int, name: str, exercises: str, passed: bool, detail: str) -> None:
     ctx.results.append(ScenarioResult(num, name, passed, detail, exercises))
     log.info(
-        "%s scenario %d: %s — %s",
+        "%s scenario %d: %s, %s",
         "✓ PASS" if passed else "✗ FAIL",
         num,
         name,
@@ -195,7 +195,7 @@ async def s03_rate_limit_refuses_51st(client: httpx.AsyncClient, ctx: RunCtx) ->
             origin_country="IN", current_country="IN",
         )
         assert r.status_code == 200, f"attempt {i + 1} should permit, got {r.status_code}"
-    log.info("50 refunds accepted — attempting 51st (should refuse)")
+    log.info("50 refunds accepted, attempting 51st (should refuse)")
     resp = await call_agent(
         client, caller_id=caller, params={"amount": 100.0},
         origin_country="IN", current_country="IN",
@@ -208,7 +208,7 @@ async def s03_rate_limit_refuses_51st(client: httpx.AsyncClient, ctx: RunCtx) ->
 
 
 async def s04_invariant_beats_policy(client: httpx.AsyncClient, ctx: RunCtx) -> None:
-    log.info("━━━ Scenario 4: reload policy to allow ₹100000 — invariant still refuses ₹60000 ━━━")
+    log.info("━━━ Scenario 4: reload policy to allow ₹100000, invariant still refuses ₹60000 ━━━")
     # Hot-reload policies that permit up to ₹1 lakh. The in-code invariant
     # (₹50k hard cap) must still refuse.
     permissive_toml = """
@@ -391,7 +391,7 @@ async def s10_wrong_key_rejected(client: httpx.AsyncClient, ctx: RunCtx) -> None
 async def s11_expired_permit_rejected(client: httpx.AsyncClient, ctx: RunCtx) -> None:
     log.info("━━━ Scenario 11: permit with expires_at in the past → 401 ━━━")
     # Craft a token with expires_at = 10s ago. Sign it with the agent's
-    # real signer so the signature is valid — but the payment service's
+    # real signer so the signature is valid, but the payment service's
     # explicit expires_at check must still refuse.
     agent_signer = PqTokenSigner.from_keypair_hybrid(ctx.agent_kp)
     tok = PermitToken(
@@ -523,7 +523,7 @@ async def s15_audit_chain_mode_mismatch(client: httpx.AsyncClient, ctx: RunCtx) 
 
 
 async def main() -> int:
-    console.rule("[bold cyan]Kavach E2E — refund scenario")
+    console.rule("[bold cyan]Kavach E2E, refund scenario")
     log.info("setting up keys + signed directory")
     bs = setup()
 
@@ -540,7 +540,7 @@ async def main() -> int:
     agent_server = await start_server(agent_app, AGENT_HOST, AGENT_PORT, "agent")
 
     # Main payment instance: hybrid verifier (this is how real deployments
-    # should run — accept hybrid, reject PQ-only, full defence in depth).
+    # should run, accept hybrid, reject PQ-only, full defence in depth).
     pay_app = payment_service.build_app(
         directory_path=bs.directory_path,
         root_vk_path=bs.root_vk_path,
@@ -560,7 +560,7 @@ async def main() -> int:
     ctx = RunCtx(agent_kp=bs.agent_kp, root_kp=bs.root_kp)
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            # Capability 1 — the gate
+            # Capability 1, the gate
             await s01_small_refund_permits(client, ctx)
             await s02_large_refund_refused(client, ctx)
             await s03_rate_limit_refuses_51st(client, ctx)
@@ -569,7 +569,7 @@ async def main() -> int:
             await s06_unknown_action_default_deny(client, ctx)
             await s07_time_window_refuses(client, ctx)
 
-            # Capability 2 — the crypto envelope
+            # Capability 2, the crypto envelope
             await s08_unsigned_refund_rejected(client, ctx)
             await s09_forged_signature_rejected(client, ctx)
             await s10_wrong_key_rejected(client, ctx)

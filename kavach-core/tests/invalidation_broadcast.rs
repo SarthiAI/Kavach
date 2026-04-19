@@ -60,7 +60,7 @@ impl Evaluator for FixedVerdictEvaluator {
         10
     }
     async fn evaluate(&self, ctx: &ActionContext) -> Verdict {
-        // Clone on every call — a single evaluator instance may be reused
+        // Clone on every call, a single evaluator instance may be reused
         // across multiple gate invocations in some tests.
         let v = self.verdict.lock().unwrap().clone().unwrap_or_else(|| {
             Verdict::Refuse(RefuseReason {
@@ -74,7 +74,7 @@ impl Evaluator for FixedVerdictEvaluator {
     }
 }
 
-/// Spy broadcaster — records every publish. Wraps an InMemoryBroadcaster so
+/// Spy broadcaster, records every publish. Wraps an InMemoryBroadcaster so
 /// subscribers still receive the messages.
 struct SpyBroadcaster {
     inner: InMemoryInvalidationBroadcaster,
@@ -113,7 +113,7 @@ impl InvalidationBroadcaster for FailingBroadcaster {
         Err(BroadcastError::BackendUnavailable("down".into()))
     }
     fn subscribe(&self) -> tokio::sync::broadcast::Receiver<InvalidationScope> {
-        // Unused in these tests — return a receiver that will stay idle.
+        // Unused in these tests, return a receiver that will stay idle.
         let (_tx, rx) = tokio::sync::broadcast::channel(1);
         rx
     }
@@ -145,7 +145,7 @@ async fn invalidate_verdict_triggers_broadcaster_publish() {
 #[tokio::test]
 async fn permit_verdict_does_not_publish() {
     let spy = Arc::new(SpyBroadcaster::new());
-    // An evaluator that permits — gate will also issue its own final Permit.
+    // An evaluator that permits, gate will also issue its own final Permit.
     let permitter = Arc::new(FixedVerdictEvaluator::new(Verdict::Permit(
         kavach_core::verdict::PermitToken::new(uuid::Uuid::new_v4(), "act".into()),
     ))) as Arc<dyn Evaluator>;

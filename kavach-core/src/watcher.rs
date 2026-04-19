@@ -7,7 +7,7 @@
 //!
 //! # Failure semantics
 //!
-//! - A parse error on the new file is **logged and swallowed** — the old,
+//! - A parse error on the new file is **logged and swallowed**, the old,
 //!   working policy set continues to run. A typo must not take down the
 //!   gate.
 //! - Filesystem errors from `notify` are logged; the watcher loop continues.
@@ -60,7 +60,7 @@ pub enum WatcherError {
 }
 
 /// Spawn a background task that watches `path` and reloads `engine` on
-/// every file modification. Returns the task handle — drop or abort to
+/// every file modification. Returns the task handle, drop or abort to
 /// stop watching.
 ///
 /// `debounce` collapses bursts of FS events (editors often produce several
@@ -88,13 +88,13 @@ pub fn spawn_policy_watcher(
         })?;
 
     let handle = tokio::spawn(async move {
-        // Keep the watcher alive for the lifetime of the task — dropping
+        // Keep the watcher alive for the lifetime of the task, dropping
         // the Watcher stops the underlying OS watch.
         let _watcher_guard = watcher;
 
         loop {
             // Wait for the first event. If the channel is closed, exit.
-            // Event contents don't matter — any filesystem event triggers
+            // Event contents don't matter, any filesystem event triggers
             // a reload attempt.
             match rx.recv().await {
                 Some(Ok(_ev)) => {}
@@ -103,7 +103,7 @@ pub fn spawn_policy_watcher(
                     continue;
                 }
                 None => {
-                    tracing::debug!("policy watcher channel closed — exiting");
+                    tracing::debug!("policy watcher channel closed, exiting");
                     return;
                 }
             }
@@ -118,7 +118,7 @@ pub fn spawn_policy_watcher(
                     maybe_ev = rx.recv() => match maybe_ev {
                         Some(_) => continue, // keep draining
                         None => {
-                            tracing::debug!("policy watcher channel closed mid-debounce — exiting");
+                            tracing::debug!("policy watcher channel closed mid-debounce, exiting");
                             return;
                         }
                     }
@@ -136,7 +136,7 @@ pub fn spawn_policy_watcher(
                     tracing::warn!(
                         path = ?path,
                         error = %e,
-                        "policy file change detected but parse failed — keeping previous policies"
+                        "policy file change detected but parse failed, keeping previous policies"
                     );
                 }
             }

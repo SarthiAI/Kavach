@@ -7,13 +7,13 @@
 //!
 //! # Two flows
 //!
-//! - [`SecureChannel::send_verdict`] / [`SecureChannel::receive_verdict`] —
+//! - [`SecureChannel::send_verdict`] / [`SecureChannel::receive_verdict`],
 //!   the original signed-verdict transport with action-name binding.
-//! - [`SecureChannel::send_signed`] / [`SecureChannel::receive_signed`] —
+//! - [`SecureChannel::send_signed`] / [`SecureChannel::receive_signed`],
 //!   signed arbitrary byte payloads with caller-provided context binding.
 //!   This is what the Python/Node SDKs expose since the SDK `Verdict` type
 //!   is language-native; callers serialize their own payloads.
-//! - [`SecureChannel::send_data`] / [`SecureChannel::receive_data`] —
+//! - [`SecureChannel::send_data`] / [`SecureChannel::receive_data`],
 //!   encryption-only transport (no signing, no replay protection).
 //!
 //! # Example
@@ -55,8 +55,8 @@ pub struct SealedVerdict {
 ///
 /// Produced by [`SecureChannel::send_signed`] (after encryption) and
 /// validated by [`SecureChannel::receive_signed`]. The `context_id`
-/// travels inside the encrypted envelope — it cannot be tampered with
-/// on the wire — and is checked against the receiver's expected context
+/// travels inside the encrypted envelope, it cannot be tampered with
+/// on the wire, and is checked against the receiver's expected context
 /// to prevent cross-context replay.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedBytes {
@@ -102,7 +102,7 @@ impl SecureChannel {
     ///
     /// **Deprecated ergonomics:** this takes a full `HybridKeyPair` for the
     /// remote side even though only the public half is needed. Prefer
-    /// [`SecureChannel::establish_from_bundle`] in new code — it accepts a
+    /// [`SecureChannel::establish_from_bundle`] in new code, it accepts a
     /// [`PublicKeyBundle`] instead.
     pub fn establish(local: &HybridKeyPair, remote: &HybridKeyPair) -> Self {
         Self {
@@ -117,7 +117,7 @@ impl SecureChannel {
 
     /// Establish a channel from the local keypair (secret side) and the
     /// remote party's public-key bundle. This is the recommended entry
-    /// point — the remote's secret keys are not required and should not
+    /// point, the remote's secret keys are not required and should not
     /// be asked for.
     ///
     /// Always hybrid (ML-DSA-65 + Ed25519 + ML-KEM-768 + X25519).
@@ -246,12 +246,12 @@ impl SecureChannel {
         )
     }
 
-    /// Send arbitrary data without signing — encryption only.
+    /// Send arbitrary data without signing, encryption only.
     pub fn send_data(&self, data: &[u8]) -> Result<EncryptedPayload> {
         self.remote_encryptor.encrypt(data)
     }
 
-    /// Receive arbitrary data without signature verification — decryption only.
+    /// Receive arbitrary data without signature verification, decryption only.
     pub fn receive_data(&self, encrypted: &EncryptedPayload) -> Result<Vec<u8>> {
         self.local_decryptor.decrypt(encrypted)
     }

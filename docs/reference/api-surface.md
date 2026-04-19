@@ -232,11 +232,20 @@ Python package entry point is [kavach-py/python/kavach/\_\_init\_\_.py](../../ka
 | [`SignedAuditChain`](../../kavach-py/src/lib.rs)                                          | Chained audit log; `verify_jsonl(data, public_keys, hybrid=None)` infers mode by default.               |
 | [`SecureChannel`](../../kavach-py/src/lib.rs)                                             | PQ secure channel; exposes `send_signed`/`receive_signed`, `send_data`/`receive_data` bytes flow.       |
 | [`GeoLocation`](../../kavach-py/src/lib.rs)                                               | Pyclass; `country_code` required, `latitude`/`longitude` unlock tolerant `GeoLocationDrift`.            |
+| [`DeviceFingerprint`](../../kavach-py/src/lib.rs)                                         | Pyclass for the device-drift detector; opaque fingerprint hash plus optional user-agent / platform.     |
+| [`InvalidationScope`](../../kavach-py/src/lib.rs)                                         | Pyclass surfaced to listener callbacks and MCP invalidate helpers; `target`, `reason`, `evaluator`.     |
+| [`InMemorySessionStore`](../../kavach-py/src/lib.rs)                                      | In-process session store; usable directly or passed to `McpKavachMiddleware(..., session_store=...)`.   |
+| [`InMemoryInvalidationBroadcaster`](../../kavach-py/src/lib.rs)                           | In-process broadcaster; pairs with `spawn_invalidation_listener` for single-node fan-out.               |
+| [`RedisRateLimitStore`](../../kavach-py/src/lib.rs)                                       | Redis-backed rate-limit store; passed as `rate_store=` to `Gate.from_toml/from_file`.                   |
+| [`RedisSessionStore`](../../kavach-py/src/lib.rs)                                         | Redis-backed session store; shared across replicas.                                                      |
+| [`RedisInvalidationBroadcaster`](../../kavach-py/src/lib.rs)                              | Redis Pub/Sub broadcaster; passed as `broadcaster=` to `Gate.from_toml/from_file`.                       |
+| [`spawn_invalidation_listener`](../../kavach-py/src/lib.rs)                               | Spawns a task that invokes a callback on every `Invalidate` verdict; returns `InvalidationListenerHandle`. |
+| [`InvalidationListenerHandle`](../../kavach-py/src/lib.rs)                                | Handle with `.abort()` to stop the listener; dropping does not auto-stop.                                |
 | [`Refused`](../../kavach-py/python/kavach/wrappers.py)                                    | Exception raised by `Gate.check` when the verdict is Refuse.                                             |
 | [`Invalidated`](../../kavach-py/python/kavach/wrappers.py)                                | Exception raised by `Gate.check` when the verdict is Invalidate.                                         |
 | [`guarded`](../../kavach-py/python/kavach/decorators.py)                                  | Decorator that wraps a function call in a Kavach `check`.                                                |
 | [`guarded_tool`](../../kavach-py/python/kavach/decorators.py)                             | Decorator variant tuned for MCP tool handlers.                                                            |
-| [`McpKavachMiddleware`](../../kavach-py/python/kavach/mcp.py)                             | MCP middleware for Python MCP servers.                                                                    |
+| [`McpKavachMiddleware`](../../kavach-py/python/kavach/mcp.py)                             | MCP middleware for Python MCP servers; accepts an optional `session_store`.                              |
 | [`HttpKavachMiddleware`](../../kavach-py/python/kavach/http.py)                           | Flask / ASGI middleware for Python HTTP servers.                                                          |
 
 ---
@@ -249,7 +258,7 @@ TypeScript entry point is [kavach-node/npm/src/index.ts](../../kavach-node/npm/s
 | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | [`Gate`](../../kavach-node/npm/src/index.ts)                                               | Idiomatic TS gate; `Gate.fromToml`, `Gate.fromFile`, `evaluate`, `check`, `reload`, `evaluatorCount`.   |
 | [`EvaluateOptions`](../../kavach-node/npm/src/index.ts)                                    | Input shape for `Gate.evaluate`: principal, action, roles, resource, params, IP, session, geo.          |
-| [`GateOptions`](../../kavach-node/npm/src/index.ts)                                        | Construction options: `invariants`, `observeOnly`, `maxSessionActions`, `enableDrift`, `tokenSigner`, `geoDriftMaxKm`. |
+| [`GateOptions`](../../kavach-node/npm/src/index.ts)                                        | Construction options: `invariants`, `observeOnly`, `maxSessionActions`, `enableDrift`, `tokenSigner`, `geoDriftMaxKm`, `broadcaster`. |
 | [`Invariant`](../../kavach-node/npm/src/index.ts)                                          | `{ name, field, maxValue }` for the core invariant evaluator.                                           |
 | [`PrincipalKind`](../../kavach-node/npm/src/index.ts)                                      | String union `'user' \| 'agent' \| 'service' \| 'scheduler' \| 'external'`.                               |
 | [`Verdict`](../../kavach-node/npm/src/index.ts)                                            | Re-export of `VerdictResult` from the native engine.                                                     |
@@ -262,7 +271,13 @@ TypeScript entry point is [kavach-node/npm/src/index.ts](../../kavach-node/npm/s
 | [`DirectoryTokenVerifier`](../../kavach-node/npm/src/index.ts)                             | Async verifier wrapping `Arc<Inner>`.                                                                     |
 | [`KavachRefused`](../../kavach-node/npm/src/index.ts)                                      | Error thrown by `Gate.check` on Refuse; carries `reason`, `evaluator`, `code`.                           |
 | [`KavachInvalidated`](../../kavach-node/npm/src/index.ts)                                  | Error thrown by `Gate.check` on Invalidate.                                                               |
+| [`InMemoryInvalidationBroadcaster`](../../kavach-node/npm/src/index.ts)                    | In-process broadcaster; pass to `GateOptions.broadcaster` and pair with `spawnInvalidationListener`.       |
+| [`InMemorySessionStore`](../../kavach-node/npm/src/mcp.ts)                                 | In-process session store; passed to `McpKavachMiddleware` via `{ sessionStore }`.                         |
+| [`spawnInvalidationListener`](../../kavach-node/npm/src/index.ts)                          | Spawns a listener that invokes a callback on every `InvalidationScopeView`; returns `InvalidationListenerHandle`. |
+| [`InvalidationListenerHandle`](../../kavach-node/npm/src/index.ts)                         | Handle with `.abort()` to stop the listener.                                                              |
 | [`McpKavachMiddleware`](../../kavach-node/npm/src/mcp.ts)                                  | MCP middleware; `checkToolCall`, `evaluateToolCall`, `guardTool`, `invalidateSession`.                    |
+| [`McpMiddlewareOptions`](../../kavach-node/npm/src/mcp.ts)                                 | Options: `sessionStore`, plus caller-info defaults.                                                       |
+| [`SessionStore`](../../kavach-node/npm/src/mcp.ts)                                         | Type interface for pluggable session stores consumed by `McpKavachMiddleware`.                            |
 | [`McpCallerInfo`](../../kavach-node/npm/src/mcp.ts)                                        | Caller shape: `callerId`, `callerKind`, `roles`, `sessionId`, `ip`, `currentGeo`, `originGeo`.            |
 | [`HttpKavachMiddleware`](../../kavach-node/npm/src/http.ts)                                | Framework-agnostic HTTP middleware class.                                                                 |
 | [`HttpMiddlewareOptions`](../../kavach-node/npm/src/http.ts)                               | Options: `gateMutationsOnly`, `excludedPaths`, `principalHeader`, `rolesHeader`, `kindHeader`, `geoResolver`. |

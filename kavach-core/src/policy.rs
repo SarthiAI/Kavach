@@ -8,9 +8,20 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
 /// A set of policies loaded from configuration.
+///
+/// The canonical wire-name for the policy list is `policy` (singular,
+/// inherited from TOML's `[[policy]]` array-of-tables convention). The
+/// alias `policies` (plural) is also accepted on deserialization so JSON
+/// and dict callers can use the more natural plural name without breaking
+/// existing TOML files.
+///
+/// `deny_unknown_fields` rejects typos at the top level (e.g. `polciies`,
+/// `policys`) so a misspelled wrapper key produces a clear error instead
+/// of yielding an empty PolicySet that default-denies every action.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct PolicySet {
-    #[serde(rename = "policy", default)]
+    #[serde(rename = "policy", alias = "policies", default)]
     pub policies: Vec<Policy>,
 }
 
@@ -29,7 +40,13 @@ impl PolicySet {
 }
 
 /// A single policy rule.
+///
+/// `deny_unknown_fields` makes typos in policy field names (e.g. `naem` instead
+/// of `name`, `efect` instead of `effect`) produce a clear deserialize error
+/// instead of being silently dropped, which previously could weaken a policy
+/// without any signal. Applies uniformly to TOML, dict, and JSON loaders.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Policy {
     /// Human-readable name for this policy.
     pub name: String,
@@ -61,8 +78,14 @@ pub enum Effect {
 }
 
 /// A condition that must hold for a policy to apply.
+///
+/// Externally tagged: each TOML / dict / JSON inline-table has exactly one key
+/// that names the variant (`identity_kind`, `param_max`, etc.) and a value with
+/// the variant's payload. `deny_unknown_fields` rejects typos such as
+/// `idnetity_kind`, which previously parsed silently and dropped the condition,
+/// resulting in a more permissive policy than the author intended.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Condition {
     /// Principal must have this role.
     IdentityRole(String),
@@ -81,14 +104,14 @@ pub enum Condition {
     /// **Fail-closed on missing field**: if the action context has no
     /// `params[field]`, the condition evaluates to `false` (the policy
     /// does not match, and the gate's default-deny floor kicks in).
-    /// This matches the product's fail-closed contract — do not rely
+    /// This matches the product's fail-closed contract, do not rely
     /// on `ParamMax` to vacuously permit when a field is absent.
     ParamMax { field: String, max: f64 },
 
     /// A numeric parameter must be present AND at least this value.
     ///
     /// **Fail-closed on missing field**: same semantics as
-    /// [`Condition::ParamMax`] — a missing field fails the condition.
+    /// [`Condition::ParamMax`], a missing field fails the condition.
     ParamMin { field: String, min: f64 },
 
     /// A string parameter must match one of these values.
@@ -111,7 +134,7 @@ impl Condition {
     /// Evaluate this condition against an action context.
     ///
     /// Most conditions are purely synchronous. [`Condition::RateLimit`] is the
-    /// exception — it queries the pluggable [`RateLimitStore`], which may be
+    /// exception, it queries the pluggable [`RateLimitStore`], which may be
     /// a remote backend. On any store error the condition evaluates to
     /// `false` (fail-closed): the gate refuses to attest that the caller is
     /// under the limit when the backend can't prove it.
@@ -151,7 +174,7 @@ impl Condition {
             Condition::RateLimit { max, window } => {
                 // The current call has already been recorded by `PolicyEngine::evaluate`
                 // before policies are checked. So `count` here is inclusive of this
-                // attempt — use `<=` so that `max = N` allows exactly N calls per window.
+                // attempt, use `<=` so that `max = N` allows exactly N calls per window.
                 let window_secs = parse_duration_secs(window).unwrap_or(3600);
                 let key = format!("{}:{}", ctx.principal.id, ctx.action.name);
                 match rate_store.count_in_window(&key, now, window_secs).await {
@@ -160,7 +183,7 @@ impl Condition {
                         tracing::warn!(
                             error = %err,
                             key = %key,
-                            "rate-limit store error — failing closed",
+                            "rate-limit store error, failing closed",
                         );
                         false
                     }
@@ -218,7 +241,7 @@ impl PolicyEngine {
     ///
     /// Takes `&self` (not `&mut self`) so it is callable through an
     /// `Arc<PolicyEngine>` that is shared with a `Gate`. Interior mutability
-    /// is provided by an `RwLock` around the policy list — in-flight
+    /// is provided by an `RwLock` around the policy list, in-flight
     /// evaluations continue to see the old set until they finish and release
     /// their read lock; subsequent evaluations pick up the new set.
     pub fn reload(&self, policy_set: PolicySet) {
@@ -239,7 +262,7 @@ impl PolicyEngine {
     ///
     /// Clones the policy list under the read lock, then releases the lock
     /// before awaiting any store I/O. This avoids holding the policy-list
-    /// lock across `.await` points — which would be unsound with
+    /// lock across `.await` points, which would be unsound with
     /// `std::sync::RwLock` (not `Send` across awaits) and would also block
     /// hot-reload waiters on slow rate-limit backends.
     async fn find_matching_policy(&self, ctx: &ActionContext, now: i64) -> Option<Policy> {
@@ -277,18 +300,18 @@ impl Evaluator for PolicyEngine {
     async fn evaluate(&self, ctx: &ActionContext) -> Verdict {
         // Record this action for rate limiting. `now` is captured once and
         // used for both the record and any in-window counts so every
-        // condition sees the same clock — this matters because record and
+        // condition sees the same clock, this matters because record and
         // count can race against each other across async awaits.
         let now = chrono::Utc::now().timestamp();
         let key = format!("{}:{}", ctx.principal.id, ctx.action.name);
         if let Err(err) = self.rate_store.record(&key, now).await {
-            // Recording failed — we must decide whether to refuse the action
+            // Recording failed, we must decide whether to refuse the action
             // entirely. Default-deny: refuse, because any subsequent
             // rate-limit check would be based on under-counted state.
             tracing::warn!(
                 error = %err,
                 key = %key,
-                "rate-limit store record failed — refusing action",
+                "rate-limit store record failed, refusing action",
             );
             return Verdict::Refuse(RefuseReason {
                 evaluator: "policy".to_string(),
@@ -313,7 +336,7 @@ impl Evaluator for PolicyEngine {
                 })
             }
             None => {
-                // Default deny — no matching policy means no permission
+                // Default deny, no matching policy means no permission
                 tracing::debug!(action = %ctx.action.name, "no matching policy (default deny)");
                 Verdict::Refuse(RefuseReason {
                     evaluator: "policy".to_string(),
@@ -344,8 +367,8 @@ fn match_pattern(pattern: &str, value: &str) -> bool {
 /// Evaluate a `TimeWindow` condition.
 ///
 /// Accepted formats:
-/// - `"09:00-18:00"` — UTC comparison (legacy, kept for backward compat).
-/// - `"09:00-18:00 Asia/Kolkata"` — `evaluated_at` is converted to the named
+/// - `"09:00-18:00"`, UTC comparison (legacy, kept for backward compat).
+/// - `"09:00-18:00 Asia/Kolkata"`, `evaluated_at` is converted to the named
 ///   IANA timezone before comparison. The timezone portion is everything
 ///   after the first whitespace; it must be a valid `chrono-tz` identifier.
 ///
@@ -354,7 +377,7 @@ fn match_pattern(pattern: &str, value: &str) -> bool {
 ///
 /// **Fail-closed on malformed input.** A window that doesn't match the
 /// expected shape, has an unparseable tz, or has malformed HH:MM values
-/// returns `false` — the policy does not match. Earlier behavior returned
+/// returns `false`, the policy does not match. Earlier behavior returned
 /// `true` on malformed windows, which was fail-open.
 fn evaluate_time_window(window: &str, evaluated_at: chrono::DateTime<chrono::Utc>) -> bool {
     use chrono::{NaiveTime, TimeZone};
@@ -366,15 +389,15 @@ fn evaluate_time_window(window: &str, evaluated_at: chrono::DateTime<chrono::Utc
     };
 
     let Some((start_str, end_str)) = range.split_once('-') else {
-        tracing::warn!(window, "TimeWindow: malformed (missing '-') — refusing");
+        tracing::warn!(window, "TimeWindow: malformed (missing '-'), refusing");
         return false;
     };
     let Ok(start) = NaiveTime::parse_from_str(start_str.trim(), "%H:%M") else {
-        tracing::warn!(window, "TimeWindow: malformed start HH:MM — refusing");
+        tracing::warn!(window, "TimeWindow: malformed start HH:MM, refusing");
         return false;
     };
     let Ok(end) = NaiveTime::parse_from_str(end_str.trim(), "%H:%M") else {
-        tracing::warn!(window, "TimeWindow: malformed end HH:MM — refusing");
+        tracing::warn!(window, "TimeWindow: malformed end HH:MM, refusing");
         return false;
     };
 
@@ -382,7 +405,7 @@ fn evaluate_time_window(window: &str, evaluated_at: chrono::DateTime<chrono::Utc
     let now_time: NaiveTime = match tz_name {
         Some(name) => {
             let Ok(tz) = name.parse::<chrono_tz::Tz>() else {
-                tracing::warn!(window, tz = name, "TimeWindow: unknown timezone — refusing");
+                tracing::warn!(window, tz = name, "TimeWindow: unknown timezone, refusing");
                 return false;
             };
             tz.from_utc_datetime(&evaluated_at.naive_utc()).time()
@@ -489,12 +512,12 @@ mod tests {
                 "09:00-18:00 Asia/Kolkata",
                 at_utc(12, 0)
             ));
-            // 06:00 UTC == 11:30 IST — still inside the IST window.
+            // 06:00 UTC == 11:30 IST, still inside the IST window.
             assert!(evaluate_time_window(
                 "09:00-18:00 Asia/Kolkata",
                 at_utc(6, 0)
             ));
-            // 00:00 UTC == 05:30 IST — outside the IST window.
+            // 00:00 UTC == 05:30 IST, outside the IST window.
             assert!(!evaluate_time_window(
                 "09:00-18:00 Asia/Kolkata",
                 at_utc(0, 0)

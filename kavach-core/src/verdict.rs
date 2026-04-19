@@ -5,13 +5,13 @@ use uuid::Uuid;
 
 /// The gate's decision about an action.
 ///
-/// There are exactly three possible outcomes — no ambiguity, no "maybe":
+/// There are exactly three possible outcomes, no ambiguity, no "maybe":
 ///
-/// - **Permit** — the action may proceed. Comes with a token that proves
+/// - **Permit**, the action may proceed. Comes with a token that proves
 ///   the gate was consulted (for audit and downstream verification).
-/// - **Refuse** — the action is blocked. Includes the reason and which
+/// - **Refuse**, the action is blocked. Includes the reason and which
 ///   evaluator refused it.
-/// - **Invalidate** — not only is this action blocked, but prior authority
+/// - **Invalidate**, not only is this action blocked, but prior authority
 ///   is revoked. The session or identity is no longer trusted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Verdict {
@@ -41,7 +41,7 @@ impl Verdict {
 
 /// Proof that the gate was consulted and issued a Permit.
 ///
-/// This token is consumed when the action executes — it cannot be reused.
+/// This token is consumed when the action executes, it cannot be reused.
 /// In PQ-enabled configurations, this token is cryptographically signed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermitToken {
@@ -92,7 +92,7 @@ impl PermitToken {
     ///
     /// Layout: `token_id (16B) || evaluation_id (16B) || issued_ts_le (8B) || expires_ts_le (8B) || action_name_utf8`.
     ///
-    /// The `signature` field is explicitly **excluded** — signing produces
+    /// The `signature` field is explicitly **excluded**, signing produces
     /// bytes that the verifier can reconstruct without knowing the signature.
     /// Any future fields added to `PermitToken` must be included here in
     /// a backwards-compatible way (e.g., length-prefixed) to preserve
@@ -113,7 +113,7 @@ impl PermitToken {
 ///
 /// kavach-core defines the trait; the concrete post-quantum implementation
 /// lives in `kavach-pq` (`PqTokenSigner`). This keeps the core crate
-/// crypto-agnostic — a consumer that doesn't need PQ signatures never
+/// crypto-agnostic, a consumer that doesn't need PQ signatures never
 /// depends on kavach-pq or pulls its heavy crypto dependencies.
 ///
 /// Signing is over [`PermitToken::canonical_bytes`], which deliberately
@@ -168,7 +168,7 @@ pub enum RefuseCode {
     SessionInvalid,
     /// Action parameters violate an invariant.
     InvariantViolation,
-    /// Drift detected — context has shifted.
+    /// Drift detected, context has shifted.
     DriftDetected,
     /// Permit token expired before execution.
     PermitExpired,

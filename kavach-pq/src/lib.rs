@@ -1,12 +1,12 @@
-//! # Kavach PQ — Post-Quantum Transport Security
+//! # Kavach PQ, Post-Quantum Transport Security
 //!
 //! Protects the wire between Kavach components. While `kavach-core`
 //! decides what's allowed, `kavach-pq` ensures those decisions can't
-//! be forged, replayed, or tampered with — even by quantum attackers.
+//! be forged, replayed, or tampered with, even by quantum attackers.
 //!
 //! - **Signs verdicts** with ML-DSA (FIPS 204)
 //! - **Encrypts channels** with ML-KEM (FIPS 203) + ChaCha20-Poly1305
-//! - **Hybrid mode** — classical + PQ combined
+//! - **Hybrid mode**, classical + PQ combined
 //! - **Signs audit logs** with tamper-evident chaining
 //!
 //! Every algorithm comes from audited RustCrypto crates. We compose, not invent.

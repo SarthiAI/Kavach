@@ -1,7 +1,7 @@
 # Multi-role policy set for the hard suite.
 #
 # Three principals hit the same gate with different caps. The invariant
-# (hard_refund_cap = 50000) lives in code and applies to all of them — no
+# (hard_refund_cap = 50000) lives in code and applies to all of them, no
 # policy can override it.
 
 # AI support agents: up to ₹5,000 per refund, 100/day.

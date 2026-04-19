@@ -17,7 +17,7 @@
 //! body. To avoid double-reading the body (which would break streaming for
 //! large uploads), the layer only reads the body when the content type
 //! suggests it's JSON *and* the body is small enough to buffer. If the body
-//! can't be buffered cheaply, the gate runs with `body = None` — invariants
+//! can't be buffered cheaply, the gate runs with `body = None`, invariants
 //! that depend on body params should set explicit size limits upstream.
 //!
 //! # Session state
@@ -47,7 +47,7 @@ use tower::{Layer, Service};
 /// body type is [`http_body_util::Either`] so the two paths can coexist.
 pub type KavachBody = Full<Bytes>;
 
-/// The response body type the layer emits — either the inner body (on
+/// The response body type the layer emits, either the inner body (on
 /// permit) or a Kavach-generated body (on refuse/invalidate).
 pub type LayerResponseBody<B> = Either<B, KavachBody>;
 
@@ -85,7 +85,7 @@ impl KavachLayer {
     }
 
     /// Configure the max body bytes the layer will buffer for gate
-    /// evaluation. Bodies larger than this are not parsed — the gate sees
+    /// evaluation. Bodies larger than this are not parsed, the gate sees
     /// `body = None`. Default 64 KiB.
     pub fn with_max_buffered_body_bytes(mut self, limit: usize) -> Self {
         self.max_buffered_body_bytes = limit;
@@ -190,7 +190,7 @@ where
     let (parts, body) = req.into_parts();
 
     // Collect the body bytes up to the configured cap. If it exceeds the cap
-    // or collection fails, the gate sees `body = None` — upstream limits are
+    // or collection fails, the gate sees `body = None`, upstream limits are
     // the caller's job.
     let body_bytes = collect_bounded_body(body, max_body).await;
 

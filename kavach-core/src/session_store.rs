@@ -7,7 +7,7 @@
 //!
 //! # Failure semantics
 //!
-//! `get` returns `Ok(None)` when the session is not found — that is *not* an
+//! `get` returns `Ok(None)` when the session is not found, that is *not* an
 //! error. `Err` is reserved for genuine backend failures. Callers should
 //! treat `Err` on `get` as fail-closed: do not permit an action when session
 //! state cannot be verified.
@@ -46,7 +46,7 @@ pub trait SessionStore: Send + Sync {
     /// Store (create or overwrite) a session.
     async fn put(&self, session_id: &str, session: SessionState) -> Result<(), SessionStoreError>;
 
-    /// Remove a session. Idempotent — removing a missing session is not an error.
+    /// Remove a session. Idempotent, removing a missing session is not an error.
     async fn delete(&self, session_id: &str) -> Result<(), SessionStoreError>;
 
     /// Remove sessions whose `age()` exceeds `max_age_seconds`.
@@ -166,7 +166,7 @@ mod tests {
         store.delete(&id).await.unwrap();
         assert!(store.get(&id).await.unwrap().is_none());
 
-        // Idempotent — second delete still succeeds.
+        // Idempotent, second delete still succeeds.
         store.delete(&id).await.unwrap();
     }
 
@@ -179,7 +179,7 @@ mod tests {
         let fresh_id = fresh.session_id.to_string();
         store.put(&fresh_id, fresh).await.unwrap();
 
-        // An "old" session — manually age its started_at by 10 minutes.
+        // An "old" session, manually age its started_at by 10 minutes.
         let mut old = sample_session();
         old.started_at = Utc::now() - chrono::Duration::minutes(10);
         let old_id = old.session_id.to_string();

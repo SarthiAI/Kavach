@@ -1,7 +1,7 @@
 //! # Kavach Python Bindings
 //!
 //! PyO3 bridge that exposes kavach-core's Rust engine to Python.
-//! All evaluation logic runs in Rust — Python calls across FFI.
+//! All evaluation logic runs in Rust, Python calls across FFI.
 //!
 //! The compiled module is `_kavach_engine`. The idiomatic Python
 //! wrapper (`kavach` package) imports from this module.
@@ -10,7 +10,7 @@
 // `PyErr::from(e)` calls in generated code where `e` is already a `PyErr`.
 // Clippy attributes these to the user-authored return-type spans, producing
 // ~30 false-positive `useless_conversion` warnings. The file's own code has
-// only 4 `.into()` calls and none are useless — suppressing at module scope.
+// only 4 `.into()` calls and none are useless, suppressing at module scope.
 #![allow(clippy::useless_conversion)]
 
 use chrono::{Duration as ChronoDuration, TimeZone, Utc};
@@ -50,6 +50,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3::wrap_pyfunction;
+use pythonize::depythonize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -65,7 +66,7 @@ fn runtime() -> &'static Runtime {
 
 // ─── Python-facing types ─────────────────────────────────────────
 
-/// A signed permit token — proof the gate ran.
+/// A signed permit token, proof the gate ran.
 ///
 /// Constructed either by reading a Verdict's `permit_token` property after
 /// a Permit verdict, or directly from the wire fields (token_id, evaluation_id,
@@ -149,7 +150,7 @@ impl PermitToken {
             .map(|s| PyBytes::new_bound(py, s))
     }
 
-    /// Canonical signable bytes — the exact bytes the signer signs.
+    /// Canonical signable bytes, the exact bytes the signer signs.
     /// Exposed for diagnostics and for callers who want to drive a custom signer.
     fn canonical_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new_bound(py, &self.inner.canonical_bytes())
@@ -268,12 +269,12 @@ impl From<core::Verdict> for Verdict {
     }
 }
 
-/// Public-key bundle — the safe-to-share half of a [`KavachKeyPair`].
+/// Public-key bundle, the safe-to-share half of a [`KavachKeyPair`].
 ///
 /// Holds raw bytes for ML-DSA-65 (signing) verifying key, ML-KEM-768
 /// (KEM) encapsulation key, Ed25519 verifying key, and X25519 public key.
 /// Use this on downstream services that only need to *verify* signatures
-/// or *encrypt* to the gate — never expose the full keypair.
+/// or *encrypt* to the gate, never expose the full keypair.
 #[pyclass]
 #[derive(Clone)]
 struct PublicKeyBundle {
@@ -329,7 +330,7 @@ impl PublicKeyBundle {
     }
 }
 
-/// A Kavach keypair — ML-DSA-65 + ML-KEM-768 + Ed25519 + X25519.
+/// A Kavach keypair, ML-DSA-65 + ML-KEM-768 + Ed25519 + X25519.
 ///
 /// Holds *both* signing/decapsulation/secret keys and their public counterparts.
 /// Use [`KavachKeyPair.public_keys`] to extract the safe-to-share
@@ -386,7 +387,7 @@ impl KavachKeyPair {
         self.inner.is_expired()
     }
 
-    /// The safe-to-share half — share this with verifiers / KEM senders.
+    /// The safe-to-share half, share this with verifiers / KEM senders.
     fn public_keys(&self) -> PublicKeyBundle {
         PublicKeyBundle {
             inner: self.inner.public_keys(),
@@ -400,7 +401,7 @@ impl KavachKeyPair {
     /// verifier with `PublicKeyDirectory.from_signed_file(path, root_vk)`,
     /// where `root_vk` is this keypair's public ML-DSA verifying key.
     ///
-    /// The signing seed never crosses the FFI — you don't need to handle
+    /// The signing seed never crosses the FFI, you don't need to handle
     /// raw secret bytes in Python.
     fn build_signed_manifest<'py>(
         &self,
@@ -427,7 +428,7 @@ impl KavachKeyPair {
     }
 }
 
-/// PQ token signer — wraps `kavach_pq::PqTokenSigner` and exposes
+/// PQ token signer, wraps `kavach_pq::PqTokenSigner` and exposes
 /// sign/verify across FFI.
 ///
 /// Construct via `PqTokenSigner.pq_only(...)` (ML-DSA-65 only) or
@@ -492,7 +493,7 @@ impl PqTokenSigner {
 
     /// Generate a fresh PQ-only signer (random ML-DSA-65 keypair).
     /// Convenience for tests / quick starts. For production key management
-    /// you'll want to persist the keypair — use `pq_only(...)` instead.
+    /// you'll want to persist the keypair, use `pq_only(...)` instead.
     #[classmethod]
     #[pyo3(signature = (key_id=None))]
     fn generate_pq_only(
@@ -618,7 +619,7 @@ impl PqTokenSigner {
     }
 }
 
-/// Geographic location — used for tolerant-mode `GeoLocationDrift`.
+/// Geographic location, used for tolerant-mode `GeoLocationDrift`.
 ///
 /// `country_code` is the only required field. `latitude` / `longitude`
 /// enable Haversine distance calculations (required for tolerant-mode
@@ -698,7 +699,7 @@ impl GeoLocation {
     }
 }
 
-/// Device fingerprint — stable hash identifying a caller's device.
+/// Device fingerprint, stable hash identifying a caller's device.
 ///
 /// Exposed as a Python class so scenarios that exercise
 /// [`DeviceDrift`](kavach_core::drift::DeviceDrift) can pass a
@@ -826,14 +827,14 @@ impl ActionContext {
             env.ip = ip_str.parse().ok();
             session.origin_ip = env.ip;
         }
-        // Explicit `origin_ip` overrides the `ip`-derived session origin —
+        // Explicit `origin_ip` overrides the `ip`-derived session origin,
         // lets callers model "session started from IP X, request coming
         // from IP Y" which is how geo-drift scenarios actually look.
         if let Some(origin_str) = origin_ip {
             session.origin_ip = origin_str.parse().ok();
         }
 
-        // Geo — current on EnvContext, origin on SessionState.
+        // Geo, current on EnvContext, origin on SessionState.
         // Tolerant-mode GeoLocationDrift needs both sides set + both with lat/lon.
         if let Some(g) = current_geo {
             env.geo = Some(g.inner);
@@ -842,7 +843,7 @@ impl ActionContext {
             session.origin_geo = Some(g.inner);
         }
 
-        // Device fingerprints — current on EnvContext, origin on SessionState.
+        // Device fingerprints, current on EnvContext, origin on SessionState.
         // DeviceDrift fires when both are Some and they differ.
         if let Some(d) = device {
             env.device = Some(d.inner);
@@ -893,7 +894,7 @@ impl ActionContext {
     }
 }
 
-/// The Kavach gate — all evaluation runs in Rust.
+/// The Kavach gate, all evaluation runs in Rust.
 #[pyclass]
 struct Gate {
     inner: Arc<core::Gate>,
@@ -903,40 +904,15 @@ struct Gate {
     policy_engine: Arc<core::PolicyEngine>,
 }
 
-#[pymethods]
+// Private helper shared by every Gate constructor: takes a deserialized
+// `PolicySet` plus the public kwargs and builds the engine. Keeps the
+// post-deserialize wiring (drift detector swap, invariant assembly, signer
+// attachment, broadcaster routing) in one place so TOML, dict, and JSON
+// loaders all behave identically once the policy is parsed.
 impl Gate {
-    /// Create a gate from a TOML policy string.
-    ///
-    /// Args:
-    ///     policy_toml: TOML string containing [[policy]] definitions
-    ///     invariants: List of (name, field, max_value) tuples for param_max invariants
-    ///     observe_only: If True, log but never block (Phase 1 rollout)
-    ///     max_session_actions: Hard limit on actions per session (optional)
-    ///     enable_drift: Include the built-in drift evaluator (default True)
-    ///     token_signer: Optional `PqTokenSigner` — when set, every Permit
-    ///         carries a signed envelope in `verdict.signature`. If signing
-    ///         fails the gate fails closed (Refuse).
-    ///     geo_drift_max_km: Optional tolerance (km) for `GeoLocationDrift`.
-    ///         When unset (default), any mid-session IP change is a Violation.
-    ///         When set, an IP change within this distance downgrades to a
-    ///         Warning — but only when both `current_geo` and `origin_geo`
-    ///         carry latitude/longitude. Missing geo with a threshold set
-    ///         fails closed (Violation).
-    #[new]
-    #[pyo3(signature = (
-        policy_toml,
-        invariants=vec![],
-        observe_only=false,
-        max_session_actions=None,
-        enable_drift=true,
-        token_signer=None,
-        geo_drift_max_km=None,
-        rate_store=None,
-        broadcaster=None,
-    ))]
     #[allow(clippy::too_many_arguments)]
-    fn new(
-        policy_toml: &str,
+    fn build_from_policies(
+        policies: core::PolicySet,
         invariants: Vec<(String, String, f64)>,
         observe_only: bool,
         max_session_actions: Option<u64>,
@@ -946,14 +922,11 @@ impl Gate {
         rate_store: Option<RedisRateLimitStore>,
         broadcaster: Option<Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let policies = core::PolicySet::from_toml(policy_toml)
-            .map_err(|e| PyValueError::new_err(format!("policy parse error: {e}")))?;
-
         // Distributed rate-limit store (Redis) when supplied; otherwise
         // the core's in-memory default. The engine owns the Arc for the
         // lifetime of the gate. Fail-closed on any store error is
-        // preserved end-to-end — see kavach-redis source for the
-        // record/count-in-window → Err path, and
+        // preserved end-to-end, see kavach-redis source for the
+        // record/count-in-window Err path, and
         // kavach-core::policy::Condition::RateLimit for the fail-closed
         // branch that surfaces the error as a refuse.
         let policy_engine = Arc::new(match rate_store {
@@ -966,7 +939,7 @@ impl Gate {
 
         let mut evaluators: Vec<Arc<dyn Evaluator>> = vec![policy_engine.clone()];
 
-        // Drift detection — swap the default strict GeoLocationDrift for a
+        // Drift detection, swap the default strict GeoLocationDrift for a
         // tolerant one when geo_drift_max_km is set.
         if enable_drift {
             let geo: Box<dyn core::DriftDetector> = match geo_drift_max_km {
@@ -1031,11 +1004,225 @@ impl Gate {
             policy_engine,
         })
     }
+}
+
+#[pymethods]
+impl Gate {
+    /// Create a gate from a TOML policy string.
+    ///
+    /// This is the constructor invoked by `_RustGate(policy_toml=...)` from
+    /// the Python wrapper's `Gate.from_toml` / `Gate.from_file`. For dict and
+    /// JSON loading paths see `from_dict`, `from_json_string`, `from_json_file`.
+    ///
+    /// Args:
+    ///     policy_toml: TOML string containing [[policy]] definitions
+    ///     invariants: List of (name, field, max_value) tuples for param_max invariants
+    ///     observe_only: If True, log but never block (Phase 1 rollout)
+    ///     max_session_actions: Hard limit on actions per session (optional)
+    ///     enable_drift: Include the built-in drift evaluator (default True)
+    ///     token_signer: Optional `PqTokenSigner`, when set, every Permit
+    ///         carries a signed envelope in `verdict.signature`. If signing
+    ///         fails the gate fails closed (Refuse).
+    ///     geo_drift_max_km: Optional tolerance (km) for `GeoLocationDrift`.
+    ///         When unset (default), any mid-session IP change is a Violation.
+    ///         When set, an IP change within this distance downgrades to a
+    ///         Warning, but only when both `current_geo` and `origin_geo`
+    ///         carry latitude/longitude. Missing geo with a threshold set
+    ///         fails closed (Violation).
+    #[new]
+    #[pyo3(signature = (
+        policy_toml,
+        invariants=vec![],
+        observe_only=false,
+        max_session_actions=None,
+        enable_drift=true,
+        token_signer=None,
+        geo_drift_max_km=None,
+        rate_store=None,
+        broadcaster=None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        policy_toml: &str,
+        invariants: Vec<(String, String, f64)>,
+        observe_only: bool,
+        max_session_actions: Option<u64>,
+        enable_drift: bool,
+        token_signer: Option<PqTokenSigner>,
+        geo_drift_max_km: Option<f64>,
+        rate_store: Option<RedisRateLimitStore>,
+        broadcaster: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let policies = core::PolicySet::from_toml(policy_toml)
+            .map_err(|e| PyValueError::new_err(format!("policy parse error: {e}")))?;
+        Self::build_from_policies(
+            policies,
+            invariants,
+            observe_only,
+            max_session_actions,
+            enable_drift,
+            token_signer,
+            geo_drift_max_km,
+            rate_store,
+            broadcaster,
+        )
+    }
+
+    /// Create a gate from a Python dict matching the policy schema.
+    ///
+    /// Same vocabulary as the TOML format: top-level `policies` is a list
+    /// of objects, each with `name`, `effect`, `conditions`, optional
+    /// `description`, optional `priority`. Conditions are dicts with one
+    /// key naming the variant (`identity_kind`, `param_max`, `rate_limit`,
+    /// etc.) and the value carrying the payload.
+    ///
+    /// Unknown / typo'd field names raise a clear `ValueError` instead of
+    /// being silently dropped (deny_unknown_fields contract from
+    /// kavach-core's serde derives). All other kwargs are identical to
+    /// `__new__`.
+    #[staticmethod]
+    #[pyo3(signature = (
+        policies,
+        invariants=vec![],
+        observe_only=false,
+        max_session_actions=None,
+        enable_drift=true,
+        token_signer=None,
+        geo_drift_max_km=None,
+        rate_store=None,
+        broadcaster=None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn from_dict(
+        policies: Bound<'_, PyAny>,
+        invariants: Vec<(String, String, f64)>,
+        observe_only: bool,
+        max_session_actions: Option<u64>,
+        enable_drift: bool,
+        token_signer: Option<PqTokenSigner>,
+        geo_drift_max_km: Option<f64>,
+        rate_store: Option<RedisRateLimitStore>,
+        broadcaster: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        // Two-step route: Python value -> serde_json::Value -> PolicySet.
+        // The intermediate JSON Value is strictly-typed so downstream
+        // serde_json::from_value catches type errors that a direct
+        // pythonize -> PolicySet would miss (e.g. a Python str silently
+        // iterating as a Vec<String> because Python strs are iterable,
+        // turning `values = "IN"` into `["I", "N"]`).
+        let json_value: serde_json::Value = depythonize(&policies).map_err(|e| {
+            PyValueError::new_err(format!("policy dict parse error: {e}"))
+        })?;
+        let policy_set: core::PolicySet = serde_json::from_value(json_value).map_err(|e| {
+            PyValueError::new_err(format!("policy dict parse error: {e}"))
+        })?;
+        Self::build_from_policies(
+            policy_set,
+            invariants,
+            observe_only,
+            max_session_actions,
+            enable_drift,
+            token_signer,
+            geo_drift_max_km,
+            rate_store,
+            broadcaster,
+        )
+    }
+
+    /// Create a gate from a JSON string carrying the policy schema.
+    ///
+    /// Same vocabulary as the TOML and dict formats. Useful when the policy
+    /// crosses a wire boundary (HTTP body, message queue, config service).
+    /// Unknown fields raise a clear `ValueError`; see `from_dict` for the
+    /// shared schema notes.
+    #[staticmethod]
+    #[pyo3(signature = (
+        json_string,
+        invariants=vec![],
+        observe_only=false,
+        max_session_actions=None,
+        enable_drift=true,
+        token_signer=None,
+        geo_drift_max_km=None,
+        rate_store=None,
+        broadcaster=None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn from_json_string(
+        json_string: &str,
+        invariants: Vec<(String, String, f64)>,
+        observe_only: bool,
+        max_session_actions: Option<u64>,
+        enable_drift: bool,
+        token_signer: Option<PqTokenSigner>,
+        geo_drift_max_km: Option<f64>,
+        rate_store: Option<RedisRateLimitStore>,
+        broadcaster: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let policy_set: core::PolicySet = serde_json::from_str(json_string).map_err(|e| {
+            PyValueError::new_err(format!("policy JSON parse error: {e}"))
+        })?;
+        Self::build_from_policies(
+            policy_set,
+            invariants,
+            observe_only,
+            max_session_actions,
+            enable_drift,
+            token_signer,
+            geo_drift_max_km,
+            rate_store,
+            broadcaster,
+        )
+    }
+
+    /// Create a gate from a JSON file on disk.
+    ///
+    /// Reads the file as text and forwards to `from_json_string`. Same
+    /// schema rules; unknown fields raise.
+    #[staticmethod]
+    #[pyo3(signature = (
+        path,
+        invariants=vec![],
+        observe_only=false,
+        max_session_actions=None,
+        enable_drift=true,
+        token_signer=None,
+        geo_drift_max_km=None,
+        rate_store=None,
+        broadcaster=None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn from_json_file(
+        path: &str,
+        invariants: Vec<(String, String, f64)>,
+        observe_only: bool,
+        max_session_actions: Option<u64>,
+        enable_drift: bool,
+        token_signer: Option<PqTokenSigner>,
+        geo_drift_max_km: Option<f64>,
+        rate_store: Option<RedisRateLimitStore>,
+        broadcaster: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            PyValueError::new_err(format!("cannot read JSON policy file '{path}': {e}"))
+        })?;
+        Self::from_json_string(
+            &content,
+            invariants,
+            observe_only,
+            max_session_actions,
+            enable_drift,
+            token_signer,
+            geo_drift_max_km,
+            rate_store,
+            broadcaster,
+        )
+    }
 
     /// Hot-reload the policy set from a fresh TOML string.
     ///
     /// Parse errors raise `ValueError` and the previous good set stays in
-    /// place — never wipe a running engine on a bad reload. An empty TOML
+    /// place, never wipe a running engine on a bad reload. An empty TOML
     /// is intentionally valid (= default-deny everything; useful as a
     /// kill-switch).
     fn reload(&self, policy_toml: &str) -> PyResult<()> {
@@ -1051,7 +1238,7 @@ impl Gate {
     /// drift detection, invariant checks. When the gate was configured
     /// with `observe_only=True` the chain still runs in full and the
     /// underlying refuse/invalidate verdicts still reach the audit sink,
-    /// but the caller-facing verdict is always Permit — operators get
+    /// but the caller-facing verdict is always Permit, operators get
     /// full visibility of what the gate *would* do without production
     /// traffic being refused.
     fn evaluate(&self, ctx: &ActionContext) -> Verdict {
@@ -1187,7 +1374,7 @@ impl AuditEntry {
 /// `verify` time.
 ///
 /// Construct with a `KavachKeyPair` and a `hybrid` flag (defaults to True).
-/// The verifier's mode must match the chain's mode — `verify` / `verify_jsonl`
+/// The verifier's mode must match the chain's mode, `verify` / `verify_jsonl`
 /// refuse to silently verify a hybrid chain under a PQ-only verifier (and
 /// vice versa), closing the signature-downgrade surface.
 #[pyclass]
@@ -1317,16 +1504,16 @@ fn serialize_encrypted_payload(payload: &EncryptedPayload) -> PyResult<Vec<u8>> 
 /// material, never shared) and the remote party's [`PublicKeyBundle`]
 /// (safe to share). Sealed payloads are opaque `bytes` that carry the
 /// full envelope (ML-KEM ciphertext, ephemeral X25519 public key, AEAD
-/// nonce + ciphertext, recipient key id) — store or transmit them
+/// nonce + ciphertext, recipient key id), store or transmit them
 /// anywhere.
 ///
 /// Three flows:
 ///
 /// - `send_signed(data, context_id, correlation_id) -> bytes` /
-///   `receive_signed(sealed, expected_context_id) -> bytes` — sign +
+///   `receive_signed(sealed, expected_context_id) -> bytes`, sign +
 ///   encrypt, with replay protection and context binding. Rejects on
 ///   tamper, wrong recipient, replay, or context mismatch.
-/// - `send_data(data) -> bytes` / `receive_data(sealed) -> bytes` —
+/// - `send_data(data) -> bytes` / `receive_data(sealed) -> bytes`,
 ///   encryption only, no signing.
 /// - `local_key_id` / `remote_key_id` for diagnostics.
 #[pyclass]
@@ -1364,7 +1551,7 @@ impl SecureChannel {
 
     /// Sign `data` (with a caller-defined `context_id` + `correlation_id`
     /// binding) and encrypt it for the remote party. Returns opaque
-    /// sealed bytes — pass them to the remote side's
+    /// sealed bytes, pass them to the remote side's
     /// `receive_signed(sealed, expected_context_id)`.
     fn send_signed<'py>(
         &self,
@@ -1431,7 +1618,7 @@ impl SecureChannel {
 
 // ─── Public-key directory ────────────────────────────────────────
 
-/// Backing store for a [`PublicKeyDirectory`] — tracks the concrete
+/// Backing store for a [`PublicKeyDirectory`], tracks the concrete
 /// implementation so we can still offer type-specific ops (insert /
 /// remove for in-memory, reload for file-backed) on top of the
 /// type-erased trait object used for `fetch`.
@@ -1445,20 +1632,20 @@ enum DirectoryKind {
 /// A directory resolves a `key_id` (stamped into every signed token
 /// envelope) to the matching [`PublicKeyBundle`]. Three backings:
 ///
-/// - `PublicKeyDirectory.in_memory(bundles=[...])` — programmatic
+/// - `PublicKeyDirectory.in_memory(bundles=[...])`, programmatic
 ///   store. Mutable via `insert` / `remove`. Good for tests and for
 ///   deployments that build the directory from code at startup.
-/// - `PublicKeyDirectory.from_file(path)` — loads an **unsigned**
+/// - `PublicKeyDirectory.from_file(path)`, loads an **unsigned**
 ///   JSON array of bundles from disk. Safe only when the file is
 ///   local to the verifier (no cross-host trust implied).
 /// - `PublicKeyDirectory.from_signed_file(path, root_ml_dsa_verifying_key)`
-///   — loads a root-signed manifest (ML-DSA-65 signature over the
+///  , loads a root-signed manifest (ML-DSA-65 signature over the
 ///   bundle JSON). Any manifest whose signature does not verify
 ///   against `root_ml_dsa_verifying_key` is **rejected at load time**.
 ///   This is the production-grade cross-host path.
 ///
 /// Any error (`NotFound`, `BackendUnavailable`, `RootSignatureInvalid`,
-/// `Corrupt`) on `fetch` raises `ValueError` — fail-closed so that
+/// `Corrupt`) on `fetch` raises `ValueError`, fail-closed so that
 /// unverifiable tokens are refused by downstream verifiers.
 #[pyclass]
 struct PublicKeyDirectory {
@@ -1511,7 +1698,7 @@ impl PublicKeyDirectory {
     }
 
     /// Fetch a bundle by `key_id`. Raises `ValueError` on
-    /// NotFound / BackendUnavailable / Corrupt — the caller is
+    /// NotFound / BackendUnavailable / Corrupt, the caller is
     /// expected to refuse downstream.
     fn fetch(&self, key_id: &str) -> PyResult<PublicKeyBundle> {
         let dir = self.inner.clone();
@@ -1619,7 +1806,7 @@ impl PublicKeyDirectory {
 }
 
 /// Verifies `PermitToken` signatures by looking up the matching
-/// [`PublicKeyBundle`] in a [`PublicKeyDirectory`] — the `key_id`
+/// [`PublicKeyBundle`] in a [`PublicKeyDirectory`], the `key_id`
 /// comes from the token envelope, so rotated/distributed keys just
 /// work as long as the directory is kept fresh.
 ///
@@ -1628,7 +1815,7 @@ impl PublicKeyDirectory {
 /// hybrid envelopes.
 ///
 /// Any failure (envelope parse, algorithm mismatch, directory miss,
-/// signature invalid) raises `ValueError` — fail-closed.
+/// signature invalid) raises `ValueError`, fail-closed.
 #[pyclass]
 struct DirectoryTokenVerifier {
     inner: Arc<DirectoryTokenVerifierInner>,
@@ -1657,7 +1844,7 @@ impl DirectoryTokenVerifier {
     ///
     /// `enforce_expiry` (default `True`): reject the verification if the
     /// resolved bundle's `expires_at` is in the past. This is the
-    /// correct-by-default posture for an authorization gate — a rotated-
+    /// correct-by-default posture for an authorization gate, a rotated-
     /// out keypair MUST NOT authorise new actions even if its signature
     /// is still cryptographically valid. Pass `enforce_expiry=False` for
     /// historical forensic verification (re-checking an archived audit
@@ -1687,7 +1874,7 @@ impl DirectoryTokenVerifier {
 // The core `RateLimitStore` / `SessionStore` / `InvalidationBroadcaster`
 // traits are object-safe but not directly Python-constructible (a
 // Python class can't implement an async Rust trait without a deep GIL
-// bridge — see HANDOFF.md § "post-release follow-ups" for the planned
+// bridge, see HANDOFF.md § "post-release follow-ups" for the planned
 // generic Python-callable bridge). For now, we expose the concrete
 // Redis implementations from `kavach-redis` as PyO3 classes. These
 // cover the dominant distributed-deployment story (Redis-backed rate
@@ -1706,7 +1893,7 @@ impl DirectoryTokenVerifier {
 /// with a 24-hour retention window (matching the in-memory default).
 ///
 /// Pass the constructed instance as the ``rate_store`` keyword to
-/// :class:`Gate`.  Fail-closed semantics are preserved — any Redis
+/// :class:`Gate`.  Fail-closed semantics are preserved, any Redis
 /// error on `record` causes the enclosing evaluation to Refuse.
 #[pyclass]
 #[derive(Clone)]
@@ -1740,14 +1927,14 @@ impl RedisRateLimitStore {
 
 /// Redis-backed distributed session store.
 ///
-/// Used by :class:`McpKavachMiddleware` (future integration — not yet
+/// Used by :class:`McpKavachMiddleware` (future integration, not yet
 /// wired through the Python MCP middleware; construct and hold for
 /// forward-compat) and by any integrator who manages ``SessionState``
 /// directly. Sessions are serialized as JSON under ``kavach:session:*``
 /// keys with a configurable TTL. Redis handles expiration natively;
 /// no cleanup loop required.
 ///
-/// Fail-closed semantics are preserved — any Redis error on `get` /
+/// Fail-closed semantics are preserved, any Redis error on `get` /
 /// `put` causes the upstream evaluator to refuse.
 #[pyclass]
 #[derive(Clone)]
@@ -1770,7 +1957,7 @@ impl RedisSessionStore {
 
     /// Construct from a Redis URL with a custom per-session TTL (seconds).
     ///
-    /// A TTL of 0 is rejected — Redis treats it as expire-immediately,
+    /// A TTL of 0 is rejected, Redis treats it as expire-immediately,
     /// which would render the store useless.
     #[classmethod]
     fn from_url_with_ttl(
@@ -1805,7 +1992,7 @@ impl RedisSessionStore {
     ///
     /// If the session does not yet exist in the store, a fresh
     /// :class:`kavach_core::SessionState` is created with
-    /// ``invalidated=true`` (acts as a poison pill — any peer node that
+    /// ``invalidated=true`` (acts as a poison pill, any peer node that
     /// later checks this session id sees it invalidated).
     fn invalidate(&self, session_id: String) -> PyResult<()> {
         let store = self.inner.clone();
@@ -1828,12 +2015,12 @@ impl RedisSessionStore {
     }
 }
 
-/// In-process session store — default backend for :class:`McpKavachMiddleware`
+/// In-process session store, default backend for :class:`McpKavachMiddleware`
 /// when no Redis store is supplied.
 ///
 /// Not distributed; sessions are lost on process restart. Useful when a
 /// single-replica deploy still wants the middleware to go through the
-/// SessionStore API instead of a local Python dict — keeps the code path
+/// SessionStore API instead of a local Python dict, keeps the code path
 /// identical between single-node and multi-node deployments.
 #[pyclass]
 #[derive(Clone)]
@@ -1898,7 +2085,7 @@ impl InMemorySessionStore {
 /// every other node subscribed to the same Redis channel.
 ///
 /// Fail-closed semantics: `publish` errors never downgrade a local
-/// verdict — an `Invalidate` stands even if peers can't be told.
+/// verdict, an `Invalidate` stands even if peers can't be told.
 /// Matches the `InvalidationBroadcaster` trait contract.
 #[pyclass]
 #[derive(Clone)]
@@ -1956,7 +2143,7 @@ impl InvalidationScope {
         }
     }
 
-    /// The identifier for the target — UUID string (session), principal id, or role name.
+    /// The identifier for the target, UUID string (session), principal id, or role name.
     #[getter]
     fn target_id(&self) -> String {
         match &self.inner.target {
@@ -1986,7 +2173,7 @@ impl InvalidationScope {
     }
 }
 
-/// Process-local invalidation broadcaster — default backend when no
+/// Process-local invalidation broadcaster, default backend when no
 /// Redis broadcaster is configured.
 ///
 /// Subscribers created via :func:`spawn_invalidation_listener` receive
@@ -2066,7 +2253,7 @@ struct InvalidationListenerHandle {
 
 #[pymethods]
 impl InvalidationListenerHandle {
-    /// Stop the listener. Idempotent — calling twice is a no-op.
+    /// Stop the listener. Idempotent, calling twice is a no-op.
     fn abort(&mut self) {
         if let Some(h) = self.handle.take() {
             h.abort();
@@ -2127,12 +2314,12 @@ fn spawn_invalidation_listener(
                     match cb.call1(py, (py_scope,)) {
                         Ok(_) => {}
                         Err(err) => {
-                            // Print to stderr instead of `tracing` — kavach-py
+                            // Print to stderr instead of `tracing`, kavach-py
                             // does not depend on the tracing crate. The listener
                             // keeps running despite the exception (matches the
                             // contract in core::spawn_invalidation_listener).
                             eprintln!(
-                                "[kavach] invalidation listener callback raised — continuing: {err}"
+                                "[kavach] invalidation listener callback raised, continuing: {err}"
                             );
                         }
                     }
@@ -2148,7 +2335,7 @@ fn spawn_invalidation_listener(
 
 // ─── Python module definition ────────────────────────────────────
 
-/// Kavach engine — compiled Rust core exposed to Python.
+/// Kavach engine, compiled Rust core exposed to Python.
 ///
 /// All gate evaluation runs natively in Rust for performance
 /// and type-safety guarantees.

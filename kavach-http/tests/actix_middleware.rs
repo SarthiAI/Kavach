@@ -33,7 +33,7 @@ conditions = [
     Arc::new(HttpGate::new(gate, HttpMiddlewareConfig::default()))
 }
 
-/// Default-deny gate — no policy permits anything. Used for refuse-path
+/// Default-deny gate, no policy permits anything. Used for refuse-path
 /// tests.
 fn default_deny_http_gate() -> Arc<HttpGate> {
     let policy_engine = Arc::new(PolicyEngine::new(PolicySet::default()));
@@ -83,7 +83,7 @@ async fn permit_forwards_to_inner_handler() {
 
 #[actix_web::test]
 async fn refuse_yields_403_with_json_body() {
-    // Default-deny gate — no policy permits anything, so this request
+    // Default-deny gate, no policy permits anything, so this request
     // should be refused with a 403 + JSON body.
     let http_gate = default_deny_http_gate();
     let app = test::init_service(
@@ -209,7 +209,7 @@ async fn oversize_body_causes_policy_to_see_none() {
     )
     .await;
 
-    // 1 KiB JSON body — way over the 32-byte cap.
+    // 1 KiB JSON body, way over the 32-byte cap.
     let big_body = serde_json::json!({
         "amount": 100,
         "padding": "x".repeat(1024),

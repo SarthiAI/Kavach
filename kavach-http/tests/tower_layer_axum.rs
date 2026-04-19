@@ -99,7 +99,7 @@ async fn non_mutating_get_passes_through_unevaluated() {
     // GET requests on non-excluded paths still aren't gated by default
     // because HttpMiddlewareConfig::gate_mutations_only=true. The gate
     // never runs and the inner handler responds.
-    let toml = ""; // default-deny — would refuse POSTs
+    let toml = ""; // default-deny, would refuse POSTs
     let app = build_app(toml, false);
     let resp = app
         .oneshot(
@@ -120,7 +120,7 @@ async fn non_mutating_get_passes_through_unevaluated() {
 
 #[tokio::test]
 async fn excluded_path_passes_through() {
-    let toml = ""; // default-deny — but /health is excluded
+    let toml = ""; // default-deny, but /health is excluded
     let app = build_app(toml, false);
     let resp = app
         .oneshot(
@@ -141,7 +141,7 @@ async fn excluded_path_passes_through() {
 async fn observe_only_returns_200_from_inner_handler_even_for_refused() {
     // The underlying gate would refuse (empty policies → default deny), but
     // observe_only=true makes HttpGate dispatch to evaluate_observe_only
-    // which always permits — so the request reaches the handler.
+    // which always permits, so the request reaches the handler.
     let toml = "";
     let app = build_app(toml, true);
     let resp = app

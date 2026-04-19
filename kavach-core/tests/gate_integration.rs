@@ -1,6 +1,6 @@
 //! Integration tests for the gate.
 //!
-//! These tests exercise the gate end-to-end through its public API —
+//! These tests exercise the gate end-to-end through its public API,
 //! building an ActionContext, running it through evaluators, and asserting
 //! on the resulting Verdict. They protect the product's core invariants:
 //!
@@ -42,7 +42,7 @@ fn build_gate(policy_toml: &str, invariants: Vec<Invariant>) -> Gate {
 
 #[tokio::test]
 async fn default_deny_with_no_matching_policy() {
-    // A gate with an empty policy set must refuse every action — the
+    // A gate with an empty policy set must refuse every action, the
     // most important invariant in the whole product.
     let gate = build_gate("", Vec::new());
     let c = ctx("agent-alice", vec!["support"], "issue_refund");
@@ -209,7 +209,7 @@ conditions = [
 async fn policy_engine_hot_reload_changes_verdict() {
     // Build a gate where the policy engine is shared (via Arc) between the
     // test and the gate. After reload, the *same* gate instance must see the
-    // new policies on the next call — no need to rebuild the gate.
+    // new policies on the next call, no need to rebuild the gate.
     let initial_toml = r#"
 [[policy]]
 name = "permit_refunds"
@@ -264,7 +264,7 @@ conditions = [
 #[tokio::test]
 async fn policy_engine_reload_to_empty_is_default_deny() {
     // A reload that empties the policy set should lock the gate down
-    // immediately — useful as a "policy kill switch" in incident response.
+    // immediately, useful as a "policy kill switch" in incident response.
     let initial_toml = r#"
 [[policy]]
 name = "permit_all"
@@ -296,7 +296,7 @@ conditions = [{ action = "issue_refund" }]
 // `ParamMax` / `ParamMin` originally `unwrap_or(true)` on a missing
 // field, meaning a policy like `{ param_min = { field = "approval",
 // min = 1.0 } }` would match any context that did not include the
-// `approval` key — effectively permitting a gate that looked like it
+// `approval` key, effectively permitting a gate that looked like it
 // required explicit approval. That's fail-open inside an otherwise
 // fail-closed product. These tests pin the corrected semantics: a
 // missing field makes the condition false, the policy stops matching,
@@ -310,7 +310,7 @@ fn ctx_without_amount(principal_id: &str, roles: Vec<&str>, action: &str) -> Act
         credentials_issued_at: chrono::Utc::now(),
         display_name: None,
     };
-    // Note: ActionDescriptor::new leaves params empty — no `.with_param(...)`.
+    // Note: ActionDescriptor::new leaves params empty, no `.with_param(...)`.
     let desc = ActionDescriptor::new(action);
     ActionContext::new(principal, desc, SessionState::new(), EnvContext::default())
 }
@@ -341,7 +341,7 @@ conditions = [
 async fn param_min_on_missing_field_fails_closed() {
     // A policy requiring manager approval (param_min approval ≥ 1) on a
     // context that carries NO `approval` field must refuse. Previously
-    // this permitted vacuously — the headline correctness bug.
+    // this permitted vacuously, the headline correctness bug.
     let toml = r#"
 [[policy]]
 name = "permit_only_with_approval"
@@ -364,7 +364,7 @@ conditions = [
 
 #[tokio::test]
 async fn param_max_present_under_limit_still_permits() {
-    // Control case — when the field IS present and under the limit,
+    // Control case, when the field IS present and under the limit,
     // the condition passes and the policy permits. This guards against
     // overcorrecting the fail-closed fix into always-refusing.
     let toml = r#"
@@ -378,7 +378,7 @@ conditions = [
 ]
 "#;
     let gate = build_gate(toml, Vec::new());
-    // `ctx` helper always sets amount = 100.0 — well under the 500 cap.
+    // `ctx` helper always sets amount = 100.0, well under the 500 cap.
     let verdict = gate
         .evaluate(&ctx("agent-alice", vec!["support"], "issue_refund"))
         .await;
@@ -423,7 +423,7 @@ conditions = [
 
 #[tokio::test]
 async fn param_min_below_limit_refuses() {
-    // Explicit 0.0 — the "negative gating" pattern consumers should
+    // Explicit 0.0, the "negative gating" pattern consumers should
     // now rely on. 0.0 < 1.0 fails the condition → policy doesn't
     // match → default-deny → refuse.
     let toml = r#"

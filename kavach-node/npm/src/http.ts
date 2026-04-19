@@ -43,7 +43,7 @@ export interface HttpMiddlewareOptions {
   /** Header containing principal kind. Default: 'x-principal-kind' */
   kindHeader?: string;
   /**
-   * Optional geo resolver — integrators plug in their GeoIP lookup
+   * Optional geo resolver, integrators plug in their GeoIP lookup
    * (MaxMind, CDN edge headers, etc.) to populate `currentGeo` and
    * `originGeo`. Return `undefined` for either to leave it unset.
    * Needed to drive tolerant-mode `GeoLocationDrift`.
@@ -78,7 +78,7 @@ export function deriveActionName(method: string, path: string): string {
 }
 
 /**
- * Core HTTP gate — framework agnostic.
+ * Core HTTP gate, framework agnostic.
  */
 export class HttpKavachMiddleware {
   private gate: Gate;

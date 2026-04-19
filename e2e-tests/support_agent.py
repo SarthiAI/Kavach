@@ -1,12 +1,12 @@
-"""FastAPI support-agent service — hosts the Kavach gate + signs permits.
+"""FastAPI support-agent service, hosts the Kavach gate + signs permits.
 
 Runs on 127.0.0.1:8001. Exposes two endpoints:
 
-    POST /agent/tool         — simulates the LLM calling a tool; gates it
-    POST /agent/reload       — hot-reloads the policy TOML (test hook)
+    POST /agent/tool        , simulates the LLM calling a tool; gates it
+    POST /agent/reload      , hot-reloads the policy TOML (test hook)
 
 The "LLM" is simulated by the test runner passing action_name + params
-directly. Every real agent integration looks like this internally — an LLM
+directly. Every real agent integration looks like this internally, an LLM
 decides to call `tool_name(args)`, the tool handler runs Kavach first.
 """
 
@@ -38,10 +38,10 @@ class ToolCall(BaseModel):
 
     caller_id: str
     action_name: str
-    # Params are untyped — body-dependent invariants (e.g. `amount`) inspect
+    # Params are untyped, body-dependent invariants (e.g. `amount`) inspect
     # these. Using dict[str, float] keeps it obvious.
     params: dict[str, float] = {}
-    # Principal identity — defaults to an AI agent, but humans / services /
+    # Principal identity, defaults to an AI agent, but humans / services /
     # schedulers hit the same gate with different kinds + roles.
     principal_kind: str = "agent"
     roles: list[str] = []
@@ -80,7 +80,7 @@ def build_app(
 
     Invariants are enforced in code (not TOML): hard refund cap of ₹50k
     regardless of what the policy set says. This is the "no policy change
-    can override me" guarantee — the same kind of thing you'd hard-wire
+    can override me" guarantee, the same kind of thing you'd hard-wire
     for KYC limits, regulatory caps, etc.
     """
     signer = PqTokenSigner.from_keypair_hybrid(keypair)
@@ -88,7 +88,7 @@ def build_app(
 
     # The gate. Policies are loaded from TOML; invariants live in code.
     # geo_drift_max_km=500 switches the GeoLocationDrift detector to tolerant
-    # mode — a mid-session jump between cities farther than 500 km apart is
+    # mode, a mid-session jump between cities farther than 500 km apart is
     # treated as a Violation (i.e. Invalidate the session).
     gate = Gate.from_file(
         str(policy_path),
@@ -129,7 +129,7 @@ def build_app(
             f" ({verdict.evaluator}: {verdict.reason})" if not verdict.is_permit else "",
         )
 
-        # Append to the signed audit chain regardless of verdict — that's
+        # Append to the signed audit chain regardless of verdict, that's
         # the whole point of audit. Even refusals are durable.
         _append_audit(state, call, verdict)
 
@@ -157,7 +157,7 @@ def build_app(
         if verdict.is_invalidate:
             raise HTTPException(status_code=401, detail=f"invalidated: {verdict.reason}")
 
-        # Refuse — the caller gets enough info to understand what broke.
+        # Refuse, the caller gets enough info to understand what broke.
         raise HTTPException(
             status_code=403,
             detail=f"[{verdict.code}] {verdict.evaluator}: {verdict.reason}",
@@ -223,7 +223,7 @@ def _build_context(call: ToolCall) -> ActionContext:
     )
 
 
-# A tiny gazetteer — enough to drive the geo-drift test without pulling
+# A tiny gazetteer, enough to drive the geo-drift test without pulling
 # in a real GeoIP database. Matches the cities Kavach's P2.7 smoke test
 # uses so the distances the library computes are predictable.
 _CITIES = {

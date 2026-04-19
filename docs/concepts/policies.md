@@ -33,21 +33,39 @@ Per-policy fields:
 
 An empty policy file is valid; it refuses every action.
 
-Load policies:
+## Loading policies
+
+Three formats are accepted, with identical semantics. Use whichever fits your workflow; you can switch between them without changing how the gate behaves.
 
 ```rust
-// Rust
+// Rust (kavach-core), TOML only at the core level.
 let policies = PolicySet::from_file("kavach.toml")?;
-// or
 let policies = PolicySet::from_toml(toml_string)?;
 ```
 
 ```python
-# Python
-gate = Gate.from_file("kavach.toml")
-# or
-gate = Gate.from_toml(policy_string)
+# Python SDK, three options.
+from kavach import Gate
+
+gate = Gate.from_toml(toml_string)             # canonical TOML
+gate = Gate.from_file("kavach.toml")            # TOML file
+gate = Gate.from_dict(policy_dict)              # native Python dict
+gate = Gate.from_json_string(json_string)       # JSON string
+gate = Gate.from_json_file("kavach.json")       # JSON file
 ```
+
+```typescript
+// Node SDK, three options.
+import { Gate } from 'kavach';
+
+const gate = Gate.fromToml(tomlString);
+const gate = Gate.fromFile('kavach.toml');
+const gate = Gate.fromObject(policyObject);     // native JS object
+const gate = Gate.fromJsonString(jsonString);
+const gate = Gate.fromJsonFile('kavach.json');
+```
+
+The condition vocabulary, defaults, and fail-closed semantics are identical across formats. Typo'd field names raise a clear error in every loader (`unknown field 'idnetity_kind', expected one of ...`) so a misspelled condition can never silently weaken a policy.
 
 ## Effect
 
@@ -96,8 +114,8 @@ Reference table, shortest description per condition:
 | `identity_role` | `{ identity_role = "support_agent" }` | Principal has this role in `principal.roles`. |
 | `identity_id` | `{ identity_id = "payment-service" }` | Principal id equals this string. |
 | `action` | `{ action = "issue_refund" }` or `{ action = "refund.*" }` | Action name exact or trailing-wildcard match. |
-| `param_max` | `{ param_max = { field = "amount", max = 5000.0 } }` | Numeric param is `<= max`. Missing param does not fail. |
-| `param_min` | `{ param_min = { field = "amount", min = 100.0 } }` | Numeric param is `>= min`. Missing param does not fail. |
+| `param_max` | `{ param_max = { field = "amount", max = 5000.0 } }` | Numeric param is `<= max`. Missing or non-numeric param fails closed (condition is false). |
+| `param_min` | `{ param_min = { field = "amount", min = 100.0 } }` | Numeric param is `>= min`. Missing or non-numeric param fails closed. |
 | `param_in` | `{ param_in = { field = "region", values = ["us", "eu"] } }` | String param is one of `values`. Missing param fails. |
 | `rate_limit` | `{ rate_limit = { max = 50, window = "24h" } }` | This `principal + action` has been called at most `max` times in the window. Fail-closed on store errors. |
 | `session_age_max` | `{ session_age_max = "4h" }` | Session younger than this duration. |

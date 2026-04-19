@@ -3,7 +3,7 @@ name = "kavach-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Core execution boundary engine — gate, verdicts, identity, policy, drift, invariants"
+description = "Core execution boundary engine, gate, verdicts, identity, policy, drift, invariants"
 
 [dependencies]
 serde = { workspace = true }
@@ -17,7 +17,7 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 
-# Hot-reload file watcher — opt-in so projects that don't need it don't
+# Hot-reload file watcher, opt-in so projects that don't need it don't
 # pay the `notify` build cost.
 notify = { version = "6", optional = true }
 

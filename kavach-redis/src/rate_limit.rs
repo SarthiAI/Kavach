@@ -15,7 +15,7 @@ use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
 use uuid::Uuid;
 
-/// 24-hour retention — anything older is pruned opportunistically on `record`.
+/// 24-hour retention, anything older is pruned opportunistically on `record`.
 /// Matches the in-memory default's retention so hot paths see identical
 /// memory/key shapes across deployments.
 const RETENTION_SECS: i64 = 86_400;
@@ -27,7 +27,7 @@ const KEY_PREFIX: &str = "kavach:rl";
 
 /// Redis-backed rate-limit store.
 ///
-/// Clone is cheap — the underlying [`ConnectionManager`] is internally
+/// Clone is cheap, the underlying [`ConnectionManager`] is internally
 /// reference-counted, so clones share the same pool and auto-reconnect logic.
 #[derive(Clone)]
 pub struct RedisRateLimitStore {
@@ -70,7 +70,7 @@ impl RateLimitStore for RedisRateLimitStore {
     async fn record(&self, key: &str, at: i64) -> Result<(), RateLimitStoreError> {
         let redis_key = Self::key(key);
 
-        // Unique member per record — two records with the same timestamp must
+        // Unique member per record, two records with the same timestamp must
         // both be counted. Using a uuid suffix guarantees ZADD inserts rather
         // than updates on timestamp collision.
         let member = format!("{at}:{}", Uuid::new_v4());
@@ -97,7 +97,7 @@ impl RateLimitStore for RedisRateLimitStore {
         let redis_key = Self::key(key);
         let cutoff = now - window_secs as i64;
 
-        // `(cutoff` is Redis' notation for exclusive lower bound — matches the
+        // `(cutoff` is Redis' notation for exclusive lower bound, matches the
         // in-memory `t > cutoff` check. Upper bound is inclusive (`now`).
         let exclusive_lower = format!("({cutoff}");
 

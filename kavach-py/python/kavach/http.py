@@ -113,7 +113,7 @@ class HttpKavachMiddleware:
     ) -> Verdict:
         """Evaluate an HTTP request against the gate.
 
-        Returns the Verdict — caller decides how to handle it. Pass
+        Returns the Verdict, caller decides how to handle it. Pass
         ``current_geo`` / ``origin_geo`` (a ``GeoLocation`` with at
         least ``country_code`` and, for tolerant-mode drift,
         ``latitude``/``longitude``) to feed ``GeoLocationDrift``.

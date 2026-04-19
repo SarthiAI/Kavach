@@ -93,13 +93,13 @@ impl AuditEntry {
 /// Trait for audit log sinks.
 ///
 /// Implementations write audit entries to a backing store.
-/// The gate calls this for every evaluation — permits, refusals, and invalidations.
+/// The gate calls this for every evaluation, permits, refusals, and invalidations.
 #[async_trait]
 pub trait AuditSink: Send + Sync {
     /// Record an audit entry.
     async fn record(&self, entry: AuditEntry) -> Result<(), KavachError>;
 
-    /// Query recent entries (optional — not all sinks support queries).
+    /// Query recent entries (optional, not all sinks support queries).
     ///
     /// The default implementation returns an empty slice; persistent stores
     /// (Postgres, Elastic, etc.) should override with their own ordered read.
@@ -160,7 +160,7 @@ impl AuditSink for AuditLog {
     }
 }
 
-/// Stdout audit sink — prints entries as JSON lines (for debugging/piping).
+/// Stdout audit sink, prints entries as JSON lines (for debugging/piping).
 pub struct StdoutAuditSink;
 
 #[async_trait]

@@ -8,7 +8,7 @@ In a real deployment:
 - Verifiers load the manifest from disk, pinning the root VK from config.
 
 For this demo we do all three in one setup step since everything runs on
-localhost. The agent keypair stays **in memory** inside the agent process —
+localhost. The agent keypair stays **in memory** inside the agent process,
 only the directory manifest and the pinned root VK touch disk.
 """
 

@@ -99,8 +99,7 @@ delete user:  REFUSE [NO_POLICY_MATCH] policy: no policy permits 'delete_user' f
 For call sites where a `Refuse` is fatal and should short-circuit normal control flow, use `Gate.check(ctx)` instead of `Gate.evaluate(ctx)`. It raises `kavach.Refused` (or `kavach.Invalidated`) instead of returning a verdict:
 
 ```python
-from kavach import Gate
-from kavach.wrappers import Refused
+from kavach import Gate, Refused
 
 try:
     gate.check(ctx_too_big)

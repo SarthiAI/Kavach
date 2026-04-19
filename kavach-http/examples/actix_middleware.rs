@@ -33,7 +33,7 @@ use kavach_http::{HttpGate, HttpMiddlewareConfig, KavachActixMiddleware};
 use std::sync::Arc;
 
 async fn root() -> impl Responder {
-    HttpResponse::Ok().body("Kavach + Actix example — try POST /api/v1/refunds\n")
+    HttpResponse::Ok().body("Kavach + Actix example, try POST /api/v1/refunds\n")
 }
 
 async fn issue_refund(body: web::Json<serde_json::Value>) -> impl Responder {
@@ -44,7 +44,7 @@ async fn issue_refund(body: web::Json<serde_json::Value>) -> impl Responder {
 }
 
 async fn create_secret() -> impl Responder {
-    // This handler is never called in this example — Kavach refuses all
+    // This handler is never called in this example, Kavach refuses all
     // `secrets.create` actions since no policy permits them.
     HttpResponse::Ok().body("should not reach here")
 }

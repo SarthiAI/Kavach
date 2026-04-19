@@ -61,7 +61,7 @@ function handleToolCall(toolName: string, params: Record<string, unknown>) {
   console.log(`\nTool: ${toolName} | Params: ${JSON.stringify(params)}`);
 
   try {
-    // Gate the call through Rust engine — throws if blocked
+    // Gate the call through Rust engine, throws if blocked
     kavach.checkToolCall(toolName, params, {
       callerId: 'support-bot',
       callerKind: 'agent',
@@ -76,12 +76,12 @@ function handleToolCall(toolName: string, params: Record<string, unknown>) {
     } else if (toolName === 'issue_refund') {
       result = issueRefund(params.orderId as string, params.amount as number);
     }
-    console.log(`  ✓ PERMITTED — result: ${JSON.stringify(result)}`);
+    console.log(`  ✓ PERMITTED, result: ${JSON.stringify(result)}`);
   } catch (err) {
     if (err instanceof KavachRefused) {
-      console.log(`  ✗ REFUSED — [${err.code}] ${err.evaluator}: ${err.reason}`);
+      console.log(`  ✗ REFUSED, [${err.code}] ${err.evaluator}: ${err.reason}`);
     } else if (err instanceof KavachInvalidated) {
-      console.log(`  ⊘ INVALIDATED — ${err.reason}`);
+      console.log(`  ⊘ INVALIDATED, ${err.reason}`);
     } else {
       throw err;
     }
@@ -110,7 +110,7 @@ handleToolCall('issue_refund', { orderId: 'ORD-7890', amount: 500 });
 // Should REFUSE (over ₹5,000 agent limit)
 handleToolCall('issue_refund', { orderId: 'ORD-7890', amount: 25_000 });
 
-// Should REFUSE (no policy — default deny)
+// Should REFUSE (no policy, default deny)
 handleToolCall('delete_customer', { customerId: 'cust_456' });
 
 // Using the guardTool wrapper

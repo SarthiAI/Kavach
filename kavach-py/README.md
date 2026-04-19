@@ -23,7 +23,7 @@ Wheels are published as `abi3`. A single wheel per platform covers CPython 3.10,
 ## 60-second quickstart
 
 ```python
-from kavach import Gate
+from kavach import ActionContext, Gate
 
 POLICY = """
 [[policy]]
@@ -41,12 +41,13 @@ gate = Gate.from_toml(
     invariants=[("hard_cap", "amount", 50_000.0)],
 )
 
-verdict = gate.evaluate(
+ctx = ActionContext(
     principal_id="agent-bot",
     principal_kind="agent",
     action_name="issue_refund",
-    params={"amount": 500},
+    params={"amount": 500.0},
 )
+verdict = gate.evaluate(ctx)
 
 if verdict.is_permit:
     process_refund()
@@ -55,6 +56,20 @@ else:
 ```
 
 A policy set with no matching permit Refuses by default. There is no implicit allow.
+
+### Three ways to load a policy
+
+The same vocabulary works in TOML, a Python dict, or a JSON file. Pick whichever fits your workflow.
+
+```python
+gate = Gate.from_toml(toml_string)             # operator-edited TOML
+gate = Gate.from_file("kavach.toml")            # TOML file on disk
+gate = Gate.from_dict(policy_dict)              # native dict (admin UI, DB row, etc.)
+gate = Gate.from_json_string(json_string)       # JSON over the wire
+gate = Gate.from_json_file("kavach.json")       # JSON file on disk
+```
+
+Typo'd field names (`{"idnetity_kind": "agent"}`) raise `ValueError` in every loader instead of being silently dropped, so a misspelled condition cannot quietly weaken a policy.
 
 ---
 
@@ -214,18 +229,18 @@ In-memory (`PublicKeyDirectory.in_memory([...])`) and unsigned-file variants are
 Same-country IP hops become Warnings instead of Violations when you provide lat/lon and a threshold:
 
 ```python
-from kavach import GeoLocation
+from kavach import ActionContext, GeoLocation
 
 gate = Gate.from_toml(POLICY, geo_drift_max_km=500.0)
 
-verdict = gate.evaluate(
+verdict = gate.evaluate(ActionContext(
     principal_id="u", principal_kind="user",
     action_name="view_profile",
     ip="2.3.4.5",
     session_id="sess-1",
     current_geo=GeoLocation("IN", city="Chennai",   latitude=13.08, longitude=80.27),
     origin_geo =GeoLocation("IN", city="Bangalore", latitude=12.97, longitude=77.59),
-)
+))
 ```
 
 Missing geo with a threshold set still **fails closed**. The SDK does not silently bypass.
@@ -233,8 +248,33 @@ Missing geo with a threshold set still **fails closed**. The SDK does not silent
 ### Policy hot reload
 
 ```python
-gate.reload(new_policy_toml)   # parse error → raises, previous set preserved
+gate.reload(new_policy_toml)   # parse error raises, previous set preserved
 ```
+
+### Multi-replica (Redis)
+
+Rate limits, sessions, and session invalidation can all move to Redis so every replica agrees:
+
+```python
+from kavach import (
+    Gate, RedisRateLimitStore, RedisSessionStore, RedisInvalidationBroadcaster,
+    McpKavachMiddleware, spawn_invalidation_listener,
+)
+
+REDIS_URL = "redis://127.0.0.1:6379"
+
+rate_store = RedisRateLimitStore(REDIS_URL)
+session_store = RedisSessionStore(REDIS_URL)
+broadcaster = RedisInvalidationBroadcaster(REDIS_URL, channel="kavach:invalidation")
+
+gate = Gate.from_toml(POLICY, rate_store=rate_store, broadcaster=broadcaster)
+mcp = McpKavachMiddleware(gate, session_store=session_store)
+
+handle = spawn_invalidation_listener(broadcaster, on_invalidation)
+# handle.abort() on shutdown
+```
+
+Redis outages fail closed: a dropped `record` refuses the action; a dropped `count` collapses the rate-limit condition to default-deny.
 
 ---
 

@@ -1,14 +1,32 @@
 # Policy Language Reference
 
-This is the exhaustive grammar reference for the TOML policy language consumed by [`PolicySet::from_toml`](../../kavach-core/src/policy.rs) and exposed through every SDK (Rust, Python, TypeScript). For conceptual background see [concepts/policies.md](../concepts/policies.md) and [concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md).
+This is the exhaustive grammar reference for the policy schema consumed by [`PolicySet`](../../kavach-core/src/policy.rs) and exposed through every SDK (Rust, Python, TypeScript). For conceptual background see [concepts/policies.md](../concepts/policies.md) and [concepts/gate-and-verdicts.md](../concepts/gate-and-verdicts.md).
 
 Everything in this document is pinned to the real parser. If syntax here does not appear in [kavach-core/src/policy.rs](../../kavach-core/src/policy.rs), it does not exist.
 
 ---
 
+## Three formats, one schema
+
+The same policy can be written in three formats. Pick the one that fits how you author or distribute policies; they all produce an identical `PolicySet` and identical evaluation outcomes.
+
+| Format | Best for | Loader |
+|--------|----------|--------|
+| **TOML** | Hand-edited operator config; file watchers; everything an SRE checks into git | `Gate.from_toml` / `Gate.from_file` (Rust, Python, Node) |
+| **Native dict / object** | Programmatic policy construction (admin UI, database row, feature flag service) | `Gate.from_dict` (Python) / `Gate.fromObject` (Node) |
+| **JSON file** | Tooling that already speaks JSON (Kubernetes ConfigMaps, secrets managers, REST APIs that emit JSON) | `Gate.from_json_file` / `Gate.from_json_string` (Python) / `Gate.fromJsonFile` / `Gate.fromJsonString` (Node) |
+
+The condition vocabulary, field names, defaults, and fail-closed semantics are identical across formats. Mixing or switching formats does not change behavior.
+
+**Typo'd or unknown field names produce a clear error in every format**, pointing at the bad key. This catches the silent class of bug where a misspelled condition (`{"idnetity_kind": "agent"}`) was previously ignored, leaving a more permissive policy than intended. See the adversarial test pinning this contract: [business-tests/tier5_loading/21_format_adversarial.py](../../../business-tests/tier5_loading/21_format_adversarial.py).
+
+---
+
 ## File shape
 
-A policy file is a TOML document containing zero or more `[[policy]]` array-of-tables entries:
+A policy file (or in-memory object) wraps a list of policies. The TOML form uses the array-of-tables convention; dict and JSON use a top-level `policies` key (the singular `policy` is also accepted as an alias for TOML compatibility).
+
+### TOML
 
 ```toml
 [[policy]]
@@ -22,7 +40,40 @@ effect = "refuse"
 conditions = [ ... ]
 ```
 
-An empty file parses to an empty `PolicySet`. This is valid and means default-deny everything (useful as a kill-switch via hot-reload).
+### Python dict / Node object
+
+```python
+# Python
+{
+    "policies": [
+        {"name": "...", "effect": "permit", "conditions": [...]},
+        {"name": "...", "effect": "refuse", "conditions": [...]},
+    ],
+}
+```
+
+```javascript
+// Node
+{
+  policies: [
+    { name: "...", effect: "permit", conditions: [ ... ] },
+    { name: "...", effect: "refuse", conditions: [ ... ] },
+  ],
+}
+```
+
+### JSON file
+
+```json
+{
+  "policies": [
+    { "name": "...", "effect": "permit", "conditions": [ ... ] },
+    { "name": "...", "effect": "refuse", "conditions": [ ... ] }
+  ]
+}
+```
+
+An empty file (or `{"policies": []}`, or `Gate.from_toml("")`) is valid and means default-deny everything (useful as a kill-switch via hot-reload).
 
 ---
 
@@ -107,17 +158,19 @@ Exact match against the principal's `id` field.
 
 Matches the action name. Supports trailing wildcards only, via `match_pattern` in [policy.rs](../../kavach-core/src/policy.rs):
 
-| Pattern form     | Matches                                    | Example                                                  |
-| ---------------- | ------------------------------------------ | -------------------------------------------------------- |
-| `"foo"`          | Exact: `ctx.action.name == "foo"`          | `"issue_refund"` matches `issue_refund` and nothing else |
-| `"foo.*"`        | Prefix before a dot: `starts_with("foo")`  | `"refund.*"` matches `refund.create`, `refund.cancel`    |
-| `"foo*"`         | Bare trailing `*`: `starts_with("foo")`    | `"refund*"` matches `refund`, `refunds`, `refunded`      |
+| Pattern form     | Strips to prefix | Matches                                                                         |
+| ---------------- | ---------------- | ------------------------------------------------------------------------------- |
+| `"foo"`          | (no strip)       | Exact string: `ctx.action.name == "foo"`.                                       |
+| `"foo.*"`        | `"foo"`          | `value.starts_with("foo")`. The trailing `.*` is peeled off as a suffix.        |
+| `"foo*"`         | `"foo"`          | `value.starts_with("foo")`. The trailing `*` is peeled off as a suffix.         |
+
+The `.` in `"foo.*"` has no regex or glob meaning; it is consumed as part of the suffix strip. As a consequence `"refund.*"` and `"refund*"` behave identically, and both match `refund`, `refund.create`, `refunds`, and `refunded` (anything starting with `refund`). Name your actions so that intended prefixes are unambiguous, or use an exact match.
 
 Other glob metacharacters (`?`, `[abc]`, leading `*`, middle `*`) are **not** supported; they match as literal characters.
 
 ```toml
-{ action = "issue_refund" }
-{ action = "delete.*" }
+{ action = "issue_refund" }   # exact match on "issue_refund"
+{ action = "delete.*" }        # any action whose name starts with "delete"
 ```
 
 ### `resource`
@@ -134,10 +187,10 @@ Numeric guards. The `field` is a key into `ctx.action.params`; the value is coer
 
 | Key          | Rust type   | Match rule                                                                                |
 | ------------ | ----------- | ----------------------------------------------------------------------------------------- |
-| `param_max`  | `{ field: String, max: f64 }` | `params[field] <= max` when present; **true when field missing** (doesn't fail the check). |
-| `param_min`  | `{ field: String, min: f64 }` | `params[field] >= min` when present; **true when field missing**.                          |
+| `param_max`  | `{ field: String, max: f64 }` | `params[field] <= max` when present; **false when field missing or not numeric** (fail-closed). |
+| `param_min`  | `{ field: String, min: f64 }` | `params[field] >= min` when present; **false when field missing or not numeric**.               |
 
-Missing-param semantics are deliberate: these are bounds checks, not existence checks. To require a parameter be present, combine with `param_in` or an invariant outside the policy layer.
+Fail-closed semantics: a missing (or non-numeric) field makes the condition `false`, which means the policy does not match. The effect is default-deny unless another policy permits. This matches the product's fail-closed contract, do not rely on `param_max` / `param_min` to vacuously permit when a field is absent. Confirm with `.unwrap_or(false)` in [policy.rs](../../kavach-core/src/policy.rs).
 
 ```toml
 { param_max = { field = "amount", max = 50000.0 } }
@@ -148,7 +201,7 @@ Missing-param semantics are deliberate: these are bounds checks, not existence c
 
 String-valued allow-list. `field` is the parameter key; `values` is a list of allowed string values. Matches iff the parameter exists **and** equals one of the values (case-sensitive).
 
-Unlike `param_max` / `param_min`, a missing parameter evaluates to **false**.
+Like `param_max` / `param_min`, a missing parameter evaluates to **false**.
 
 ```toml
 { param_in = { field = "currency", values = ["INR", "USD", "EUR"] } }

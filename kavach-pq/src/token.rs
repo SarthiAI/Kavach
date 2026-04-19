@@ -11,11 +11,11 @@
 //! The signature bytes stored in `PermitToken::signature` are a JSON-encoded
 //! [`SignedTokenEnvelope`] containing:
 //!
-//! - `key_id` — identifier of the keypair that produced the signature (so a
+//! - `key_id`, identifier of the keypair that produced the signature (so a
 //!   verifier can select the right verifying key from a key store).
-//! - `algorithm` — `"ml-dsa-65"` or `"ml-dsa-65+ed25519"`.
-//! - `ml_dsa_signature` — raw ML-DSA-65 signature over `PermitToken::canonical_bytes()`.
-//! - `ed25519_signature` — raw 64-byte Ed25519 signature over the same bytes, in hybrid mode.
+//! - `algorithm`, `"ml-dsa-65"` or `"ml-dsa-65+ed25519"`.
+//! - `ml_dsa_signature`, raw ML-DSA-65 signature over `PermitToken::canonical_bytes()`.
+//! - `ed25519_signature`, raw 64-byte Ed25519 signature over the same bytes, in hybrid mode.
 //!
 //! Signing is over [`kavach_core::PermitToken::canonical_bytes`], which is
 //! a stable concatenation of the token_id + evaluation_id + issued_at +
@@ -47,7 +47,7 @@ pub struct SignedTokenEnvelope {
     /// ID of the Kavach keypair that produced this signature.
     pub key_id: String,
 
-    /// Algorithm identifier — `"ml-dsa-65"` or `"ml-dsa-65+ed25519"`.
+    /// Algorithm identifier, `"ml-dsa-65"` or `"ml-dsa-65+ed25519"`.
     pub algorithm: String,
 
     /// Raw ML-DSA-65 signature bytes over `PermitToken::canonical_bytes()`.
@@ -63,7 +63,7 @@ const ALG_HYBRID: &str = "ml-dsa-65+ed25519";
 
 /// Signs and verifies permit tokens with ML-DSA-65, optionally plus Ed25519.
 ///
-/// In **hybrid mode**, verification requires *both* signatures to be valid —
+/// In **hybrid mode**, verification requires *both* signatures to be valid,
 /// an attacker must break both ML-DSA and Ed25519 to forge a token.
 pub struct PqTokenSigner {
     /// ML-DSA-65 signing key (32-byte seed `xi`).
@@ -72,10 +72,10 @@ pub struct PqTokenSigner {
     /// ML-DSA-65 verifying key (encoded form).
     ml_dsa_verifying_key: Vec<u8>,
 
-    /// Ed25519 signing key (32-byte seed) — `Some` iff hybrid mode.
+    /// Ed25519 signing key (32-byte seed), `Some` iff hybrid mode.
     ed25519_signing_key: Option<Vec<u8>>,
 
-    /// Ed25519 verifying key (32 bytes) — `Some` iff hybrid mode.
+    /// Ed25519 verifying key (32 bytes), `Some` iff hybrid mode.
     ed25519_verifying_key: Option<Vec<u8>>,
 
     /// Key ID stamped into every envelope.
@@ -234,7 +234,7 @@ impl TokenSigner for PqTokenSigner {
             .map_err(|e| KavachError::Serialization(format!("token envelope parse: {e}")))?;
 
         // If the verifier is configured for hybrid but the token only carries
-        // a PQ-only algorithm, reject — do not silently downgrade security.
+        // a PQ-only algorithm, reject, do not silently downgrade security.
         let envelope_is_hybrid = envelope.algorithm == ALG_HYBRID;
         if self.hybrid && !envelope_is_hybrid {
             return Err(KavachError::Serialization(format!(
@@ -272,7 +272,7 @@ impl TokenSigner for PqTokenSigner {
 /// [`PublicKeyDirectory`] based on the `key_id` stamped into each envelope.
 ///
 /// Use this on downstream services that receive tokens signed by many
-/// rotating keys. The verifier never holds a private key — it only holds a
+/// rotating keys. The verifier never holds a private key, it only holds a
 /// handle to the directory.
 ///
 /// # Hybrid mode
@@ -342,7 +342,7 @@ impl DirectoryTokenVerifier {
     }
 
     /// Verify `token` against `signature` using a key looked up from the
-    /// directory by `key_id`. Pure cryptographic check — does NOT consult
+    /// directory by `key_id`. Pure cryptographic check, does NOT consult
     /// the resolved bundle's `expires_at`. Use
     /// [`Self::verify_with_expiry`] when you want the verifier to refuse
     /// tokens whose signing bundle has expired.
@@ -358,7 +358,7 @@ impl DirectoryTokenVerifier {
     /// looked-up bundle's `expires_at` is in the past.
     ///
     /// When `enforce_expiry` is `false` this is identical to
-    /// [`Self::verify`] — pure ML-DSA (+ optional Ed25519) over the
+    /// [`Self::verify`], pure ML-DSA (+ optional Ed25519) over the
     /// canonical bytes. When `true`, an expired bundle short-circuits
     /// with [`DirectoryVerifyError::BundleExpired`] *before* any signature
     /// verification runs.
@@ -377,7 +377,7 @@ impl DirectoryTokenVerifier {
         let envelope: SignedTokenEnvelope = serde_json::from_slice(signature)
             .map_err(|e| DirectoryVerifyError::EnvelopeParse(e.to_string()))?;
 
-        // Algorithm guard — match PqTokenSigner::verify exactly to avoid
+        // Algorithm guard, match PqTokenSigner::verify exactly to avoid
         // downgrade attacks.
         let envelope_is_hybrid = envelope.algorithm == ALG_HYBRID;
         if self.hybrid && !envelope_is_hybrid {

@@ -40,7 +40,7 @@ pub enum RateLimitStoreError {
 /// Backing store for rate-limit accounting.
 ///
 /// Implementations must be safe to share across threads (`Send + Sync`) and
-/// safe to call concurrently — the gate hits the store from every evaluation
+/// safe to call concurrently, the gate hits the store from every evaluation
 /// on the hot path.
 #[async_trait]
 pub trait RateLimitStore: Send + Sync {
@@ -53,7 +53,7 @@ pub trait RateLimitStore: Send + Sync {
     /// Count occurrences of `key` in the half-open interval `(now - window_secs, now]`.
     ///
     /// The interval is inclusive on the "now" side so that a just-recorded
-    /// event counts immediately — this is what keeps rate limits accurate
+    /// event counts immediately, this is what keeps rate limits accurate
     /// under record-first-then-check.
     async fn count_in_window(
         &self,
@@ -165,7 +165,7 @@ mod tests {
 
         // Write something 30 hours "ago"
         store.record("k", 0).await.unwrap();
-        // Write something now — the prune runs on record
+        // Write something now, the prune runs on record
         store.record("k", day + 3600).await.unwrap();
 
         // Total records in the internal vec should be 1 (the old one pruned).

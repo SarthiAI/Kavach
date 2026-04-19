@@ -16,7 +16,7 @@ Action attempted ──▶ Gate (identity · policy · drift · invariants) ─�
 npm install kavach
 ```
 
-Native addons are published for Linux x64/arm64 and macOS x64/arm64.
+Native addons are published for Linux x64/arm64 and macOS x64/arm64. Node 20+.
 
 ---
 
@@ -55,6 +55,20 @@ if (verdict.isPermit) {
 ```
 
 A policy set with no matching permit Refuses by default. There is no implicit allow.
+
+### Three ways to load a policy
+
+The same vocabulary works in TOML, a plain JS object, or a JSON file. Pick whichever fits your workflow.
+
+```typescript
+const gate = Gate.fromToml(tomlString);          // operator-edited TOML
+const gate = Gate.fromFile('kavach.toml');       // TOML file on disk
+const gate = Gate.fromObject(policyObject);      // native object (admin UI, DB row, etc.)
+const gate = Gate.fromJsonString(jsonString);    // JSON over the wire
+const gate = Gate.fromJsonFile('kavach.json');   // JSON file on disk
+```
+
+Typo'd field names (`{ idnetity_kind: 'agent' }`) throw a clear error in every loader instead of being silently dropped, so a misspelled condition cannot quietly weaken a policy.
 
 ---
 
@@ -237,8 +251,30 @@ Missing geo with a threshold set still **fails closed**. The SDK does not silent
 ### Policy hot reload
 
 ```typescript
-gate.reload(newPolicyToml);   // parse error → throws, previous set preserved
+gate.reload(newPolicyToml);   // parse error throws, previous set preserved
 ```
+
+### In-process invalidation
+
+Fan out `Invalidate` verdicts to everything on this node that needs to react (MCP session store, HTTP session cache, metrics, kill-session hooks):
+
+```typescript
+import {
+  Gate, InMemoryInvalidationBroadcaster, InMemorySessionStore,
+  McpKavachMiddleware, spawnInvalidationListener,
+} from 'kavach';
+
+const broadcaster = new InMemoryInvalidationBroadcaster();
+const gate = Gate.fromToml(POLICY, { broadcaster });
+const mcp = new McpKavachMiddleware(gate, { sessionStore: new InMemorySessionStore() });
+
+const handle = spawnInvalidationListener(broadcaster, (scope) => {
+  console.log(`invalidated: ${scope.target} (${scope.reason})`);
+});
+// handle.abort() on shutdown
+```
+
+The Node SDK currently ships the in-process broadcaster only; multi-replica Redis fan-out lives on the Rust side (see [docs/guides/distributed.md](https://github.com/SarthiAI/Kavach/blob/main/docs/guides/distributed.md)).
 
 ---
 

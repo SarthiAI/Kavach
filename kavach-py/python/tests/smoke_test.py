@@ -45,7 +45,7 @@ FAIL = "\033[31m✗\033[0m"
 
 def check(name: str, condition: bool, detail: str = "") -> bool:
     mark = PASS if condition else FAIL
-    tail = f" — {detail}" if detail else ""
+    tail = f", {detail}" if detail else ""
     print(f"  {mark} {name}{tail}")
     return condition
 
@@ -66,12 +66,12 @@ def test_rust_binding_loads() -> list[bool]:
     )
     results.append(check("ActionContext constructed", ctx is not None))
 
-    # isinstance Verdict check — we can't instantiate Verdict directly
+    # isinstance Verdict check, we can't instantiate Verdict directly
     # but evaluate() returns one.
     return results
 
 
-# ─── 2. Gate wrapper — permit path ─────────────────────────────────────
+# ─── 2. Gate wrapper, permit path ─────────────────────────────────────
 
 def test_gate_permit() -> list[bool]:
     print("\n[2] Gate.from_toml → evaluate → Permit")
@@ -108,7 +108,7 @@ conditions = [
     return results
 
 
-# ─── 3. Gate — default-deny path ───────────────────────────────────────
+# ─── 3. Gate, default-deny path ───────────────────────────────────────
 
 def test_gate_default_deny() -> list[bool]:
     print("\n[3] Empty policy set → default-deny")
@@ -125,7 +125,7 @@ def test_gate_default_deny() -> list[bool]:
     return results
 
 
-# ─── 4. Gate — invariant override ──────────────────────────────────────
+# ─── 4. Gate, invariant override ──────────────────────────────────────
 
 def test_invariant_overrides_policy() -> list[bool]:
     print("\n[4] Invariant blocks even when policy permits")
@@ -260,7 +260,7 @@ def test_invalid_toml() -> list[bool]:
     return results
 
 
-# ─── 8. PqTokenSigner — sign/verify roundtrip + tamper detection ───────
+# ─── 8. PqTokenSigner, sign/verify roundtrip + tamper detection ───────
 
 def test_pq_token_signer() -> list[bool]:
     print("\n[8] PqTokenSigner sign/verify (PQ-only + hybrid)")
@@ -284,7 +284,7 @@ def test_pq_token_signer() -> list[bool]:
         pq.verify(token, sig)
         results.append(check("PQ-only verify(valid) succeeds", True))
     except Exception as e:
-        results.append(check(f"PQ-only verify(valid) — got {type(e).__name__}: {e}", False))
+        results.append(check(f"PQ-only verify(valid), got {type(e).__name__}: {e}", False))
 
     # Tamper signature
     bad_sig = bytearray(sig)
@@ -296,7 +296,7 @@ def test_pq_token_signer() -> list[bool]:
         raised = True
     results.append(check("PQ-only verify(tampered sig) raises ValueError", raised))
 
-    # Tamper token (change action_name) — verify against original sig must fail
+    # Tamper token (change action_name), verify against original sig must fail
     tampered_token = PermitToken(
         token_id="00000000-0000-0000-0000-000000000001",
         evaluation_id="00000000-0000-0000-0000-000000000002",
@@ -328,7 +328,7 @@ def test_pq_token_signer() -> list[bool]:
         hy.verify(token, sig_h)
         results.append(check("hybrid verify(valid) succeeds", True))
     except Exception as e:
-        results.append(check(f"hybrid verify(valid) — got {type(e).__name__}: {e}", False))
+        results.append(check(f"hybrid verify(valid), got {type(e).__name__}: {e}", False))
 
     # Hybrid rejects PQ-only envelope (downgrade guard)
     raised = False
@@ -349,7 +349,7 @@ def test_pq_token_signer() -> list[bool]:
     return results
 
 
-# ─── 9. Gate.with token_signer — signed permit roundtrip ───────────────
+# ─── 9. Gate.with token_signer, signed permit roundtrip ───────────────
 
 def test_gate_with_signer() -> list[bool]:
     print("\n[9] Gate(token_signer=…) → signed Permit verifies end-to-end")
@@ -386,7 +386,7 @@ conditions = [
         signer.verify(pt, pt.signature)
         results.append(check("signer.verify(permit_token, signature) succeeds", True))
     except Exception as e:
-        results.append(check(f"signer.verify — got {type(e).__name__}: {e}", False))
+        results.append(check(f"signer.verify, got {type(e).__name__}: {e}", False))
 
     # Tamper: forge a token reusing the signature for a different action
     forged = PermitToken(
@@ -406,10 +406,10 @@ conditions = [
     return results
 
 
-# ─── 10. Gate.reload — hot policy swap + parse error fail-safe ─────────
+# ─── 10. Gate.reload, hot policy swap + parse error fail-safe ─────────
 
 def test_gate_reload() -> list[bool]:
-    print("\n[10] Gate.reload — hot policy swap")
+    print("\n[10] Gate.reload, hot policy swap")
     results: list[bool] = []
 
     permissive = """
@@ -431,11 +431,11 @@ conditions = [
     )
     results.append(check("initial policy permits", gate.evaluate(ctx).is_permit))
 
-    # Swap to default-deny — an empty PolicySet
+    # Swap to default-deny, an empty PolicySet
     gate.reload("")
     results.append(check("reload('') swaps to default-deny", gate.evaluate(ctx).is_refuse))
 
-    # Swap back — should permit again
+    # Swap back, should permit again
     gate.reload(permissive)
     results.append(check("reload(permissive) restores permit", gate.evaluate(ctx).is_permit))
 
@@ -488,7 +488,7 @@ def test_keypair_generate() -> list[bool]:
     other = KavachKeyPair.generate()
     results.append(check("two generations produce distinct ids", kp.id != other.id))
 
-    # Signer from keypair (PQ-only) — sign + verify roundtrip through bundle's VK
+    # Signer from keypair (PQ-only), sign + verify roundtrip through bundle's VK
     signer = PqTokenSigner.from_keypair_pq_only(kp)
     results.append(check("from_keypair_pq_only forwards kp.id",
                          signer.key_id == kp.id and signer.is_hybrid is False))
@@ -504,9 +504,9 @@ def test_keypair_generate() -> list[bool]:
 
     # Verify via a *separate* signer rebuilt from the bundle's VK + the kp's
     # signing-key bytes (we still need the SK to construct it, but the VK
-    # comes from the bundle — proves bundle bytes are usable).
+    # comes from the bundle, proves bundle bytes are usable).
     rebuilt = PqTokenSigner.pq_only(
-        ml_dsa_signing_key=b"",  # placeholder — we won't sign with this
+        ml_dsa_signing_key=b"",  # placeholder, we won't sign with this
         ml_dsa_verifying_key=bundle.ml_dsa_verifying_key,
         key_id=kp.id,
     )
@@ -514,7 +514,7 @@ def test_keypair_generate() -> list[bool]:
         rebuilt.verify(token, sig)
         results.append(check("verify via bundle's VK succeeds", True))
     except Exception as e:
-        results.append(check(f"verify via bundle's VK — got {type(e).__name__}: {e}", False))
+        results.append(check(f"verify via bundle's VK, got {type(e).__name__}: {e}", False))
 
     # Hybrid from_keypair
     hy = PqTokenSigner.from_keypair_hybrid(kp)
@@ -524,7 +524,7 @@ def test_keypair_generate() -> list[bool]:
         hy.verify(token, sig_h)
         results.append(check("from_keypair_hybrid roundtrip succeeds", True))
     except Exception as e:
-        results.append(check(f"hybrid roundtrip — got {type(e).__name__}: {e}", False))
+        results.append(check(f"hybrid roundtrip, got {type(e).__name__}: {e}", False))
 
     # Expiry: a 1-second TTL is expired after sleeping past it
     short = KavachKeyPair.generate_with_expiry(1)
@@ -536,7 +536,7 @@ def test_keypair_generate() -> list[bool]:
     return results
 
 
-# ─── 12. SignedAuditChain — append/verify/export/tamper detection ──────
+# ─── 12. SignedAuditChain, append/verify/export/tamper detection ──────
 
 def test_signed_audit_chain() -> list[bool]:
     print("\n[12] SignedAuditChain append + verify + export + tamper detection")
@@ -568,7 +568,7 @@ def test_signed_audit_chain() -> list[bool]:
         chain.verify(bundle)
         results.append(check("chain.verify(bundle) succeeds", True))
     except Exception as e:
-        results.append(check(f"chain.verify — got {type(e).__name__}: {e}", False))
+        results.append(check(f"chain.verify, got {type(e).__name__}: {e}", False))
 
     # Export to JSONL bytes
     blob = chain.export_jsonl()
@@ -576,11 +576,11 @@ def test_signed_audit_chain() -> list[bool]:
     line_count = blob.count(b"\n")
     results.append(check("export_jsonl has 3 lines", line_count == 3))
 
-    # verify_jsonl roundtrip — explicit hybrid=True
+    # verify_jsonl roundtrip, explicit hybrid=True
     verified_n = SignedAuditChain.verify_jsonl(blob, bundle, hybrid=True)
     results.append(check("verify_jsonl(hybrid=True) returns 3", verified_n == 3))
 
-    # verify_jsonl mode inference — omit the hybrid flag; blob says hybrid
+    # verify_jsonl mode inference, omit the hybrid flag; blob says hybrid
     inferred_n = SignedAuditChain.verify_jsonl(blob, bundle)
     results.append(check("verify_jsonl without hybrid infers hybrid", inferred_n == 3))
     inferred_n2 = SignedAuditChain.verify_jsonl(blob, bundle, hybrid=None)
@@ -607,7 +607,7 @@ def test_signed_audit_chain() -> list[bool]:
         raised = True
     results.append(check("wrong-key bundle → verify_jsonl raises", raised))
 
-    # Hybrid/PQ-only mismatch — a PQ-only verifier MUST reject a hybrid chain.
+    # Hybrid/PQ-only mismatch, a PQ-only verifier MUST reject a hybrid chain.
     # This is the signature-downgrade surface; it must fail closed.
     raised = False
     try:
@@ -624,7 +624,7 @@ def test_signed_audit_chain() -> list[bool]:
         pq_chain.verify(bundle)
         results.append(check("PQ-only chain.verify succeeds", True))
     except Exception as e:
-        results.append(check(f"PQ-only chain.verify — got {type(e).__name__}: {e}", False))
+        results.append(check(f"PQ-only chain.verify, got {type(e).__name__}: {e}", False))
 
     # Hybrid verifier rejects PQ-only chain (no Ed25519 sig present)
     pq_blob = pq_chain.export_jsonl()
@@ -654,12 +654,12 @@ def test_signed_audit_chain() -> list[bool]:
         empty.verify(bundle)
         results.append(check("empty chain verifies", True))
     except Exception as e:
-        results.append(check(f"empty chain.verify — got {type(e).__name__}: {e}", False))
+        results.append(check(f"empty chain.verify, got {type(e).__name__}: {e}", False))
 
     return results
 
 
-# ─── 13. SecureChannel — hybrid encrypt + sign + replay + context binding ────
+# ─── 13. SecureChannel, hybrid encrypt + sign + replay + context binding ────
 
 def test_secure_channel() -> list[bool]:
     print("\n[13] SecureChannel send/receive + replay + tamper + context binding")
@@ -724,7 +724,7 @@ def test_secure_channel() -> list[bool]:
 
     # --- Ciphertext tamper rejected ---
     sealed3 = gate_ch.send_signed(payload, context_id="issue_refund", correlation_id="eval-3")
-    # Flip a byte deep inside — envelope is JSON so the offset lands in the base64-ish ciphertext field.
+    # Flip a byte deep inside, envelope is JSON so the offset lands in the base64-ish ciphertext field.
     tampered = bytearray(sealed3)
     tampered[len(tampered) // 2] ^= 0x01
     raised = False
@@ -835,13 +835,13 @@ def test_public_key_directory() -> list[bool]:
     results.append(check("remove missing returns False", dir_im.remove(kp_c.id) is False))
     results.append(check("after remove length == 2", dir_im.length == 2))
 
-    # DirectoryTokenVerifier — hybrid verifier against hybrid signer → success
+    # DirectoryTokenVerifier, hybrid verifier against hybrid signer → success
     verifier = DirectoryTokenVerifier(dir_im, hybrid=True)
     try:
         verifier.verify(token, sig_a)
         results.append(check("hybrid verifier: valid hybrid sig succeeds", True))
     except Exception as e:
-        results.append(check(f"hybrid verifier: hybrid sig — got {type(e).__name__}: {e}", False))
+        results.append(check(f"hybrid verifier: hybrid sig, got {type(e).__name__}: {e}", False))
 
     # Tampered signature → rejected
     tampered = bytearray(sig_a)
@@ -895,7 +895,7 @@ def test_public_key_directory() -> list[bool]:
         results.append(check("PQ-only verifier accepts PQ-only envelope", True))
     except Exception as e:
         results.append(
-            check(f"PQ-only verifier + PQ sig — got {type(e).__name__}: {e}", False)
+            check(f"PQ-only verifier + PQ sig, got {type(e).__name__}: {e}", False)
         )
 
     # PQ-only verifier rejects hybrid envelope
@@ -935,7 +935,7 @@ def test_public_key_directory() -> list[bool]:
             dir_im.reload()
             results.append(check("reload on in-memory directory is no-op", True))
         except Exception as e:
-            results.append(check(f"reload on in-memory — got {type(e).__name__}: {e}", False))
+            results.append(check(f"reload on in-memory, got {type(e).__name__}: {e}", False))
 
         # File reload picks up changes
         updated = PublicKeyDirectory.build_unsigned_manifest([bundle_a, bundle_b, bundle_c])
@@ -1021,7 +1021,7 @@ def test_public_key_directory() -> list[bool]:
             results.append(check("E2E: signed-manifest-backed verifier accepts valid token", True))
         except Exception as e:
             results.append(
-                check(f"E2E verify — got {type(e).__name__}: {e}", False)
+                check(f"E2E verify, got {type(e).__name__}: {e}", False)
             )
     finally:
         os.unlink(signed_path2)
@@ -1035,7 +1035,7 @@ def test_geo_drift() -> list[bool]:
     print("\n[15] GeoLocation + tolerant-mode GeoLocationDrift across the SDK")
     results: list[bool] = []
 
-    # Allow policy that covers fetch_report — drift runs after policy.
+    # Allow policy that covers fetch_report, drift runs after policy.
     policy_toml = """
 [[policy]]
 name = "allow_fetch_report"
@@ -1082,7 +1082,7 @@ conditions = [
     strict_gate = Gate.from_toml(policy_toml)
     session_id = "00000000-0000-0000-0000-000000000001"
 
-    # Session start (no IP change yet — just populate origin)
+    # Session start (no IP change yet, just populate origin)
     v0 = strict_gate.evaluate(
         ActionContext(
             principal_id="alice",
@@ -1098,7 +1098,7 @@ conditions = [
     # so origin_ip == current_ip and this should Permit cleanly.
     results.append(check("strict: matching ip+geo permits", v0.is_permit))
 
-    # Different current IP vs origin — strict mode always invalidates.
+    # Different current IP vs origin, strict mode always invalidates.
     # Note: the SDK's ActionContext builds a fresh SessionState every call
     # and sets session.origin_ip = env.ip. To simulate a mid-session IP
     # change from the SDK, we'd need to persist session state across calls,
@@ -1125,7 +1125,7 @@ conditions = [
     # ── Explicit drift simulation via manual ActionContext construction ─
     # We can't easily manipulate SessionState across FFI calls, but we CAN
     # verify that passing geo to ActionContext doesn't break existing
-    # evaluators (which is the production concern — P2.7 is plumbing).
+    # evaluators (which is the production concern, P2.7 is plumbing).
     ctx_with_geo = ActionContext(
         principal_id="alice",
         principal_kind="user",
@@ -1155,7 +1155,7 @@ conditions = [
         results.append(check("MCP check_tool_call accepts geo kwargs", True))
     except Exception as e:
         results.append(
-            check(f"MCP check_tool_call with geo — got {type(e).__name__}: {e}", False)
+            check(f"MCP check_tool_call with geo, got {type(e).__name__}: {e}", False)
         )
 
     vdict = mcp.evaluate_tool_call(
@@ -1175,7 +1175,7 @@ conditions = [
     from kavach import HttpKavachMiddleware
 
     def resolver(method, path, ip, **_) -> dict:
-        # Pretend we did GeoIP — always return Bangalore.
+        # Pretend we did GeoIP, always return Bangalore.
         return {"current_geo": bangalore, "origin_geo": bangalore}
 
     http = HttpKavachMiddleware(tolerant_gate, geo_resolver=resolver)

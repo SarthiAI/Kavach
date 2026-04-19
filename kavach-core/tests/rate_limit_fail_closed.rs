@@ -160,7 +160,7 @@ conditions = [
 #[tokio::test]
 async fn count_failure_does_not_affect_non_rate_limited_policy() {
     // A policy that does NOT use rate_limit should not be affected by a
-    // flaky count backend — the hot path shouldn't artificially deny.
+    // flaky count backend, the hot path shouldn't artificially deny.
     // (record still succeeds; only count fails in this impl.)
     let toml = r#"
 [[policy]]

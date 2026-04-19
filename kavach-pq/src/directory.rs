@@ -1,4 +1,4 @@
-//! Public key directory — how verifiers find the right [`PublicKeyBundle`]
+//! Public key directory, how verifiers find the right [`PublicKeyBundle`]
 //! for a token they've received.
 //!
 //! # Problem this solves
@@ -6,26 +6,26 @@
 //! A [`PermitToken`] signed by node A carries a `key_id` in its signed
 //! envelope. A verifier elsewhere needs to look up the corresponding
 //! [`PublicKeyBundle`] to check the signature. Without a distribution
-//! mechanism, verifiers have to be told the key out-of-band — which breaks
+//! mechanism, verifiers have to be told the key out-of-band, which breaks
 //! as soon as node A rotates its signing key.
 //!
 //! # Design
 //!
-//! - [`PublicKeyDirectory`] — async trait: `fetch(key_id)` returns the bundle.
-//! - [`InMemoryPublicKeyDirectory`] — programmatic store; useful for tests
+//! - [`PublicKeyDirectory`], async trait: `fetch(key_id)` returns the bundle.
+//! - [`InMemoryPublicKeyDirectory`], programmatic store; useful for tests
 //!   and for deployments that seed bundles at startup from code.
-//! - [`FilePublicKeyDirectory`] — loads bundles from a JSON manifest on disk.
+//! - [`FilePublicKeyDirectory`], loads bundles from a JSON manifest on disk.
 //!   Supports optional root-signed manifests: the verifier pins an ML-DSA
 //!   root verifying key in config, and any file whose contents aren't signed
 //!   by that root is rejected. Reload is explicit (`reload()`) so integrators
-//!   control the cadence — a file watcher can be built on top using `notify`.
+//!   control the cadence, a file watcher can be built on top using `notify`.
 //!
 //! # Trust model
 //!
 //! The directory returns bundles; it does **not** itself sign tokens. If the
 //! file impl is configured with a root verifying key, it verifies that the
 //! manifest was signed by the root before exposing any bundle. Without a
-//! root key, the file contents are trusted as-is — appropriate only when
+//! root key, the file contents are trusted as-is, appropriate only when
 //! the file is on a host Kavach trusts entirely (local disk on the verifier,
 //! etc.). Cross-host distribution should always use a root-signed manifest.
 //!
@@ -79,7 +79,7 @@ pub enum KeyDirectoryError {
 pub trait PublicKeyDirectory: Send + Sync {
     /// Fetch the bundle for `key_id`. Returns `NotFound` if the directory
     /// does not know about this key (vs. `BackendUnavailable` for a transport
-    /// failure — callers may want to distinguish).
+    /// failure, callers may want to distinguish).
     async fn fetch(&self, key_id: &str) -> Result<PublicKeyBundle, KeyDirectoryError>;
 }
 

@@ -30,12 +30,12 @@ pub struct Gate {
 impl Gate {
     /// Create a gate with the given evaluators.
     ///
-    /// The gate starts with a no-op invalidation broadcaster — suitable for
+    /// The gate starts with a no-op invalidation broadcaster, suitable for
     /// single-node deployments where invalidations only need to be honored
     /// locally. Use [`Gate::with_broadcaster`] to plug in a distributed
     /// broadcaster so peers also see the invalidation.
     pub fn new(mut evaluators: Vec<Arc<dyn Evaluator>>, config: GateConfig) -> Self {
-        // Sort by priority — lowest number runs first
+        // Sort by priority, lowest number runs first
         evaluators.sort_by_key(|e| e.priority());
         Self {
             evaluators,
@@ -56,7 +56,7 @@ impl Gate {
     ///
     /// When `Gate::evaluate` produces an `Invalidate` verdict, the scope is
     /// published to every subscriber via this broadcaster. Broadcast
-    /// failures are logged but never downgrade the local verdict — the
+    /// failures are logged but never downgrade the local verdict, the
     /// local node still treats the session as invalidated.
     pub fn with_broadcaster(mut self, broadcaster: Arc<dyn InvalidationBroadcaster>) -> Self {
         self.broadcaster = broadcaster;
@@ -70,7 +70,7 @@ impl Gate {
     /// `signature` field populated before the verdict leaves the gate.
     ///
     /// If the signer fails (e.g., key unavailable, crypto error), the gate
-    /// converts the `Permit` into a `Refuse` — failing closed. A gate that
+    /// converts the `Permit` into a `Refuse`, failing closed. A gate that
     /// was configured for signed permits must not silently downgrade to
     /// unsigned permits.
     pub fn with_token_signer(mut self, signer: Arc<dyn TokenSigner>) -> Self {
@@ -133,13 +133,13 @@ impl Gate {
                         "authority invalidated"
                     );
                     // Fan out to peer nodes. Failures are logged but do not
-                    // downgrade the local verdict — local invalidation stands
+                    // downgrade the local verdict, local invalidation stands
                     // regardless of whether peers were notified.
                     if let Err(err) = self.broadcaster.publish(scope.clone()).await {
                         warn!(
                             error = %err,
                             scope = %scope,
-                            "invalidation broadcast failed — local verdict unaffected"
+                            "invalidation broadcast failed, local verdict unaffected"
                         );
                     }
                     self.record_verdict(ctx, &verdict).await;
@@ -148,7 +148,7 @@ impl Gate {
             }
         }
 
-        // All evaluators passed — issue permit
+        // All evaluators passed, issue permit
         let mut token = PermitToken::new(ctx.evaluation_id, ctx.action.name.clone());
 
         // If a token signer is configured, sign the permit before it leaves
@@ -157,7 +157,7 @@ impl Gate {
             match signer.sign(&token) {
                 Ok(sig) => token.signature = Some(sig),
                 Err(e) => {
-                    error!(error = %e, "token signing failed — refusing action (fail-closed)");
+                    error!(error = %e, "token signing failed, refusing action (fail-closed)");
                     let verdict = Verdict::Refuse(RefuseReason {
                         evaluator: "gate".to_string(),
                         reason: format!("token signing failed: {e}"),
@@ -174,7 +174,7 @@ impl Gate {
 
         info!(
             evaluation_id = %ctx.evaluation_id,
-            "all evaluators passed — action permitted"
+            "all evaluators passed, action permitted"
         );
 
         self.record_verdict(ctx, &verdict).await;
@@ -222,7 +222,7 @@ impl Gate {
         self.config.observe_only
     }
 
-    /// Evaluate but never block — useful for Phase 1 rollout.
+    /// Evaluate but never block, useful for Phase 1 rollout.
     ///
     /// Runs all evaluators and logs the verdict, but always returns Permit.
     /// Use this to see what *would* be blocked before turning enforcement on.
@@ -263,7 +263,7 @@ impl<A: Action> Guarded<A> {
     /// This checks that the permit hasn't expired (permits are short-lived,
     /// typically 30 seconds) and that the action name matches.
     ///
-    /// The Guarded wrapper is consumed — a permit cannot be reused.
+    /// The Guarded wrapper is consumed, a permit cannot be reused.
     pub async fn execute(self) -> Result<A::Output, KavachError> {
         // Verify the permit is still valid
         if self.token.is_expired() {
@@ -308,7 +308,7 @@ pub struct GateConfig {
     pub permit_ttl_seconds: u64,
 
     /// Whether to fail open (permit on evaluator error) or fail closed (refuse).
-    /// Default: false (fail closed — refuse on error).
+    /// Default: false (fail closed, refuse on error).
     #[serde(default)]
     pub fail_open: bool,
 }

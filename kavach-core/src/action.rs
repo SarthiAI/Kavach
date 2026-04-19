@@ -50,6 +50,6 @@ pub trait Action: Send + Sync + 'static {
     /// Execute the action.
     ///
     /// This is only called after the gate issues a Permit verdict.
-    /// You should never call this directly — use [`Guarded::execute`](crate::gate::Guarded::execute).
+    /// You should never call this directly, use [`Guarded::execute`](crate::gate::Guarded::execute).
     async fn execute(self) -> Result<Self::Output, KavachError>;
 }

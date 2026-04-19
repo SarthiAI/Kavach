@@ -54,14 +54,38 @@ An empty policy string is valid. It default-denies everything, which is useful a
 
 ## Constructing a `Gate`
 
-Two factories, both taking the same keyword options.
+Five factories, all taking the same keyword options. Pick whichever fits how you store or generate policies; they all produce identical behavior.
 
 ```python
 from kavach import Gate
 
-gate = Gate.from_toml(toml_string, ...)
-gate = Gate.from_file("kavach.toml", ...)
+gate = Gate.from_toml(toml_string, ...)         # TOML string (operator-edited config)
+gate = Gate.from_file("kavach.toml", ...)        # TOML file on disk
+gate = Gate.from_dict(policy_dict, ...)          # native Python dict
+gate = Gate.from_json_string(json_string, ...)   # JSON string (e.g. wire body)
+gate = Gate.from_json_file("kavach.json", ...)   # JSON file on disk
 ```
+
+All five share the same condition vocabulary; see [reference/policy-language.md](../reference/policy-language.md) for the full grammar. Typo'd or unknown field names raise a clear `ValueError` in every loader. Example:
+
+```python
+gate = Gate.from_dict({
+    "policies": [
+        {
+            "name": "agent_small_refunds",
+            "effect": "permit",
+            "conditions": [
+                {"identity_kind": "agent"},
+                {"action": "issue_refund"},
+                {"param_max": {"field": "amount", "max": 5000.0}},
+                {"rate_limit": {"max": 50, "window": "24h"}},
+            ],
+        },
+    ],
+})
+```
+
+For programmatic policy construction (admin UI submissions, database rows, feature flags), `from_dict` is usually the cleanest path: build the dict however you like, hand it to the gate, no string templating.
 
 Keyword arguments:
 
@@ -73,6 +97,8 @@ Keyword arguments:
 | `enable_drift` | `bool` | Default `True`. Attaches `DriftEvaluator::with_defaults()`. |
 | `token_signer` | `PqTokenSigner \| None` | Signs every Permit; sign failures fail closed (Refuse). |
 | `geo_drift_max_km` | `float \| None` | Enables tolerant-mode `GeoLocationDrift`. Missing geo with a threshold set still fails closed. |
+| `rate_store` | `RedisRateLimitStore \| None` | Swaps the default in-memory rate counter for a Redis-backed one that stays consistent across service replicas. Redis errors fail closed. See [Distributed deployments](#distributed-deployments). |
+| `broadcaster` | `InMemoryInvalidationBroadcaster \| RedisInvalidationBroadcaster \| None` | Publishes every `Invalidate` verdict so peer nodes can drop the session locally. Publish failures never downgrade the local verdict. |
 
 ---
 
@@ -123,10 +149,10 @@ verdict.signature                    # bytes, populated when token_signer is set
 gate.check(ctx)                      # raises Refused / Invalidated on block
 ```
 
-Catch the exception types from `kavach.wrappers`:
+Catch the exception types at the top level:
 
 ```python
-from kavach.wrappers import Refused, Invalidated
+from kavach import Refused, Invalidated
 
 try:
     gate.check(ctx)
@@ -422,6 +448,78 @@ Replay, ciphertext tamper, wrong recipient, wrong expected context, and unsigned
 
 ---
 
+## Distributed deployments
+
+The default `Gate` uses in-process stores: rate-limit counters, session state, and invalidation bookkeeping all live in the current Python process. That is fine for a single pod, wrong for anything behind a load balancer with two or more replicas.
+
+Kavach exposes pluggable stores at both the in-memory tier (useful for tests and single-node) and the Redis tier (multi-replica production).
+
+### Single-node, in-process
+
+```python
+from kavach import (
+    ActionContext, Gate,
+    InMemoryInvalidationBroadcaster, InMemorySessionStore,
+    McpKavachMiddleware, spawn_invalidation_listener,
+)
+
+broadcaster = InMemoryInvalidationBroadcaster()
+gate = Gate.from_toml(POLICY, broadcaster=broadcaster)
+
+# McpKavachMiddleware can share a session store so invalidations fan out
+# to every tool call on this node. Defaults to a private InMemorySessionStore.
+mcp = McpKavachMiddleware(gate, session_store=InMemorySessionStore())
+
+# React to Invalidate verdicts from anywhere in the process.
+handle = spawn_invalidation_listener(
+    broadcaster,
+    lambda scope: print(f"invalidated: {scope.target} ({scope.reason})"),
+)
+# ...
+handle.abort()   # stop the listener on shutdown
+```
+
+`InvalidationScope` carries `.target` (a tagged union: session / principal / role), `.reason`, and `.evaluator`. Listener exceptions are caught and printed to stderr; they never kill the listener.
+
+### Multi-replica with Redis
+
+Spin up Redis (`docker run --rm -p 6379:6379 redis:7`) and point every replica at the same URL.
+
+```python
+from kavach import (
+    Gate,
+    RedisRateLimitStore, RedisSessionStore, RedisInvalidationBroadcaster,
+    McpKavachMiddleware, spawn_invalidation_listener,
+)
+
+REDIS_URL = "redis://127.0.0.1:6379"
+
+rate_store  = RedisRateLimitStore(REDIS_URL)
+session_store = RedisSessionStore(REDIS_URL)
+broadcaster = RedisInvalidationBroadcaster(REDIS_URL, channel="kavach:invalidation")
+
+gate = Gate.from_toml(
+    POLICY,
+    rate_store=rate_store,
+    broadcaster=broadcaster,
+)
+
+mcp = McpKavachMiddleware(gate, session_store=session_store)
+
+# Listener bridges the Redis Pub/Sub channel into your process: one per replica.
+handle = spawn_invalidation_listener(broadcaster, on_invalidation)
+```
+
+Semantic notes:
+
+- **Rate-limit store failure fails closed.** A Redis outage during `record` refuses the action; a failure during `count_in_window` makes the rate-limit condition evaluate to `false`, which cascades to default-deny. Either way, Redis down is never "free refunds."
+- **Broadcast failure never downgrades the local verdict.** The local `Invalidate` stands; peers missing the publish pick up the state next time they read the shared session store.
+- **Connect timeout is 5 s.** A bad Redis URL surfaces as `ValueError("redis connect timed out after 5s")` within seconds rather than hanging forever.
+
+For the full multi-node wiring (HTTP layer, session resolvers, the Rust-level reconnect behaviour), see [guides/distributed.md](distributed.md).
+
+---
+
 ## Hot reload
 
 ```python
@@ -452,7 +550,7 @@ from kavach import (
     PqTokenSigner, PublicKeyDirectory, SecureChannel, SignedAuditChain,
     guarded,
 )
-from kavach.wrappers import Invalidated, Refused
+from kavach import Invalidated, Refused
 
 
 POLICY = """

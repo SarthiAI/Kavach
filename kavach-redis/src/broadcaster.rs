@@ -5,7 +5,7 @@
 //! own stream type, so we bridge the two: a background task owns the Redis
 //! subscription, decodes every message, and fans it out through a local
 //! `broadcast::Sender`. Callers of `subscribe()` get a receiver on that local
-//! sender — exactly what the trait expects.
+//! sender, exactly what the trait expects.
 //!
 //! ## Lifecycle
 //!
@@ -19,7 +19,7 @@
 //! ## Failure semantics
 //!
 //! `publish` returns `Err(BackendUnavailable)` on any Redis error. The gate
-//! treats this as best-effort — a local `Invalidate` verdict still stands
+//! treats this as best-effort, a local `Invalidate` verdict still stands
 //! even if peers can't be told. This mirrors
 //! [`InMemoryInvalidationBroadcaster`](kavach_core::invalidation::InMemoryInvalidationBroadcaster)'s
 //! "no-subscribers is not an error" stance.
@@ -56,7 +56,7 @@ pub enum RedisBroadcasterError {
 
 /// Redis Pub/Sub-backed invalidation broadcaster.
 ///
-/// Clone is cheap — all clones share the same bridge task via `Arc`.
+/// Clone is cheap, all clones share the same bridge task via `Arc`.
 #[derive(Clone)]
 pub struct RedisInvalidationBroadcaster {
     inner: Arc<Inner>,
@@ -181,7 +181,7 @@ fn spawn_bridge(
                     tracing::warn!(
                         error = %err,
                         channel = %channel,
-                        "redis pubsub bridge error — retrying"
+                        "redis pubsub bridge error, retrying"
                     );
                 }
             }
@@ -212,7 +212,7 @@ async fn run_bridge(
         match serde_json::from_str::<InvalidationScope>(&payload) {
             Ok(scope) => {
                 // `broadcast::Sender::send` returns `Err` only when there are
-                // zero receivers — that's legitimate and not a bug.
+                // zero receivers, that's legitimate and not a bug.
                 let _ = sender.send(scope);
             }
             Err(err) => {

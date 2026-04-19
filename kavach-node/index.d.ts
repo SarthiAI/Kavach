@@ -17,7 +17,7 @@ export interface VerdictResult {
    * `null` for Refuse / Invalidate.
    */
   permitToken?: PermitTokenView
-  /** Convenience: signature bytes (or null) — same as `permit_token.signature`. */
+  /** Convenience: signature bytes (or null), same as `permit_token.signature`. */
   signature?: Buffer
 }
 /**
@@ -58,7 +58,7 @@ export interface ActionContextInput {
   originGeo?: GeoLocationInput
   /**
    * Explicit session-origin IP. When set, overrides the `ip`-derived
-   * default (`session.origin_ip = env.ip`) — lets callers model
+   * default (`session.origin_ip = env.ip`), lets callers model
    * "session started from X, request from Y" for strict/tolerant
    * `GeoLocationDrift`.
    */
@@ -164,7 +164,7 @@ export interface InvalidationScopeView {
  * `callback` is any JS function taking a single
  * `InvalidationScopeView` argument. The callback runs on the Node
  * event loop (ThreadsafeFunction); exceptions thrown inside the
- * callback do NOT stop the listener — they surface through the
+ * callback do NOT stop the listener, they surface through the
  * napi error strategy.
  *
  * Returns an `InvalidationListenerHandle`; call `.abort()` to stop
@@ -172,11 +172,11 @@ export interface InvalidationScopeView {
  */
 export declare function spawnInvalidationListener(broadcaster: InMemoryInvalidationBroadcaster, callback: (...args: any[]) => any): InvalidationListenerHandle
 /**
- * A Kavach keypair — ML-DSA-65 + ML-KEM-768 + Ed25519 + X25519.
+ * A Kavach keypair, ML-DSA-65 + ML-KEM-768 + Ed25519 + X25519.
  *
  * Holds *both* signing/decapsulation/secret keys and their public counterparts.
  * Use `publicKeys()` to extract the safe-to-share `PublicKeyBundle` and
- * share *that* with verifiers — never the keypair itself.
+ * share *that* with verifiers, never the keypair itself.
  */
 export declare class KavachKeyPair {
   /** Generate a fresh random keypair (no expiry). */
@@ -188,7 +188,7 @@ export declare class KavachKeyPair {
   get expiresAt(): number | null
   /** True if this keypair has passed its expiry. */
   get isExpired(): boolean
-  /** The safe-to-share half — share this with verifiers / KEM senders. */
+  /** The safe-to-share half, share this with verifiers / KEM senders. */
   publicKeys(): PublicKeyBundleView
   /**
    * Sign a `PublicKeyDirectory` manifest with this keypair's ML-DSA-65
@@ -202,7 +202,7 @@ export declare class KavachKeyPair {
   buildSignedManifest(bundles: Array<PublicKeyBundleView>): Buffer
 }
 /**
- * PQ token signer — wraps `kavach_pq::PqTokenSigner` and exposes
+ * PQ token signer, wraps `kavach_pq::PqTokenSigner` and exposes
  * sign/verify across the FFI.
  *
  * Construct via `PqTokenSigner.pqOnly(...)` (ML-DSA-65 only) or
@@ -218,7 +218,7 @@ export declare class PqTokenSigner {
   /**
    * Generate a fresh PQ-only signer (random ML-DSA-65 keypair).
    * Convenience for tests / quick starts. For production key management
-   * you'll want to persist the keypair — use `pqOnly(...)` instead.
+   * you'll want to persist the keypair, use `pqOnly(...)` instead.
    */
   static generatePqOnly(keyId?: string | undefined | null): PqTokenSigner
   /** Generate a fresh hybrid signer (random ML-DSA-65 + Ed25519 keypair). */
@@ -269,7 +269,7 @@ export declare class AuditEntry {
  * Each appended entry is signed (ML-DSA-65, plus Ed25519 in hybrid mode)
  * and linked to the previous entry via a SHA-256 hash chain. Reordering,
  * inserting, deleting, mutating, or splicing across modes is detected at
- * `verify` time. The verifier's mode must match the chain's mode —
+ * `verify` time. The verifier's mode must match the chain's mode,
  * `verify` and `verifyJsonl` refuse to silently accept a hybrid chain
  * under a PQ-only verifier (and vice versa), closing the
  * signature-downgrade surface.
@@ -316,6 +316,11 @@ export declare class KavachGate {
   /**
    * Create a new Kavach gate from TOML policy configuration.
    *
+   * This is the constructor invoked by `new KavachGate(...)` and routed
+   * through `Gate.fromToml` / `Gate.fromFile` in the TS wrapper. For
+   * object and JSON loading paths see `fromObject`, `fromJsonString`,
+   * `fromJsonFile`.
+   *
    * All evaluation logic runs in compiled Rust.
    * When a `tokenSigner` is supplied, every Permit verdict carries a
    * signed envelope on `verdict.signature` / `verdict.permitToken.signature`.
@@ -323,15 +328,44 @@ export declare class KavachGate {
    *
    * `geoDriftMaxKm`: tolerance (km) for `GeoLocationDrift`. When unset,
    * any mid-session IP change is a Violation. When set, an IP change
-   * within this distance downgrades to a Warning — requires both
+   * within this distance downgrades to a Warning, requires both
    * `currentGeo` and `originGeo` to carry latitude/longitude. Missing
    * geo with a threshold set fails closed.
    */
   constructor(policyToml: string, invariants?: Array<InvariantInput> | undefined | null, observeOnly?: boolean | undefined | null, maxSessionActions?: number | undefined | null, enableDrift?: boolean | undefined | null, tokenSigner?: PqTokenSigner | undefined | null, geoDriftMaxKm?: number | undefined | null, broadcaster?: InMemoryInvalidationBroadcaster | undefined | null)
   /**
+   * Create a gate from a plain JS object matching the policy schema.
+   *
+   * Same vocabulary as the TOML format: top-level `policies` (or `policy`)
+   * is an array of policy objects, each with `name`, `effect`, `conditions`,
+   * optional `description`, optional `priority`. Each condition is an
+   * object with one key naming the variant (`identity_kind`, `param_max`,
+   * `rate_limit`, etc.) and the value carrying the payload.
+   *
+   * Typo'd / unknown field names throw a clear error instead of being
+   * silently dropped (deny_unknown_fields contract from kavach-core's
+   * serde derives). All other parameters are identical to `new`.
+   */
+  static fromObject(policies: any, invariants?: Array<InvariantInput> | undefined | null, observeOnly?: boolean | undefined | null, maxSessionActions?: number | undefined | null, enableDrift?: boolean | undefined | null, tokenSigner?: PqTokenSigner | undefined | null, geoDriftMaxKm?: number | undefined | null, broadcaster?: InMemoryInvalidationBroadcaster | undefined | null): KavachGate
+  /**
+   * Create a gate from a JSON string carrying the policy schema.
+   *
+   * Same vocabulary as the TOML and object formats. Useful when the
+   * policy crosses a wire boundary (HTTP body, message queue, config
+   * service). Unknown fields throw a clear error.
+   */
+  static fromJsonString(jsonString: string, invariants?: Array<InvariantInput> | undefined | null, observeOnly?: boolean | undefined | null, maxSessionActions?: number | undefined | null, enableDrift?: boolean | undefined | null, tokenSigner?: PqTokenSigner | undefined | null, geoDriftMaxKm?: number | undefined | null, broadcaster?: InMemoryInvalidationBroadcaster | undefined | null): KavachGate
+  /**
+   * Create a gate from a JSON policy file on disk.
+   *
+   * Reads the file as text and forwards to `fromJsonString`. Same schema
+   * rules; unknown fields throw.
+   */
+  static fromJsonFile(path: string, invariants?: Array<InvariantInput> | undefined | null, observeOnly?: boolean | undefined | null, maxSessionActions?: number | undefined | null, enableDrift?: boolean | undefined | null, tokenSigner?: PqTokenSigner | undefined | null, geoDriftMaxKm?: number | undefined | null, broadcaster?: InMemoryInvalidationBroadcaster | undefined | null): KavachGate
+  /**
    * Hot-reload the policy set from a fresh TOML string.
    *
-   * Parse errors throw and the previous good set stays in place — never
+   * Parse errors throw and the previous good set stays in place, never
    * wipe a running engine on a bad reload. An empty TOML is intentionally
    * valid (= default-deny everything; useful as a kill-switch).
    */
@@ -342,7 +376,7 @@ export declare class KavachGate {
    * Crosses into Rust for all evaluation: policy, drift, invariants.
    * When the gate was configured with `observeOnly: true`, the full
    * evaluator chain still runs and real Refuse/Invalidate verdicts
-   * still reach the audit sink and the broadcaster — but the
+   * still reach the audit sink and the broadcaster, but the
    * caller-facing verdict is always Permit. Operators get full
    * visibility of what the gate *would* do without production
    * traffic being refused during a rollout.
@@ -355,16 +389,16 @@ export declare class KavachGate {
  * A hybrid-encrypted, PQ-signed channel between two Kavach services.
  *
  * Each side constructs a channel from their own `KavachKeyPair` (secret
- * material — never share) and the remote party's `PublicKeyBundle`
+ * material, never share) and the remote party's `PublicKeyBundle`
  * (safe to share). Sealed payloads are opaque `Buffer`s carrying the
  * full envelope; store or transmit them anywhere.
  *
  * Three flows:
  * - `sendSigned(data, contextId, correlationId)` / `receiveSigned(sealed,
- *   expectedContextId)` — sign + encrypt, with replay protection and
+ *   expectedContextId)`, sign + encrypt, with replay protection and
  *   context binding. Throws on tamper, wrong recipient, replay, or
  *   context mismatch.
- * - `sendData(data)` / `receiveData(sealed)` — encryption only, no
+ * - `sendData(data)` / `receiveData(sealed)`, encryption only, no
  *   signing.
  * - `localKeyId` / `remoteKeyId` getters for diagnostics.
  */
@@ -378,7 +412,7 @@ export declare class SecureChannel {
   get remoteKeyId(): string
   /**
    * Sign + encrypt `data`, binding it to `contextId` and
-   * `correlationId`. Returns opaque sealed bytes — pass them to the
+   * `correlationId`. Returns opaque sealed bytes, pass them to the
    * remote side's `receiveSigned`.
    */
   sendSigned(data: Buffer, contextId: string, correlationId: string): Buffer
@@ -400,17 +434,17 @@ export declare class SecureChannel {
  * Public-key distribution surface for downstream verifiers.
  *
  * Three backings:
- * - `PublicKeyDirectory.inMemory(bundles)` — programmatic store,
+ * - `PublicKeyDirectory.inMemory(bundles)`, programmatic store,
  *   mutable via `insert` / `remove`.
- * - `PublicKeyDirectory.fromFile(path)` — unsigned JSON array on
+ * - `PublicKeyDirectory.fromFile(path)`, unsigned JSON array on
  *   disk. Safe only when the file is local to the verifier.
  * - `PublicKeyDirectory.fromSignedFile(path, rootMlDsaVerifyingKey)`
- *   — root-signed manifest. Any file whose ML-DSA-65 signature
+ *  , root-signed manifest. Any file whose ML-DSA-65 signature
  *   doesn't verify against `rootMlDsaVerifyingKey` is rejected at
  *   load time. Use this for cross-host trust.
  *
  * `fetch(keyId)` throws on any failure (NotFound /
- * BackendUnavailable / RootSignatureInvalid / Corrupt) — fail-closed
+ * BackendUnavailable / RootSignatureInvalid / Corrupt), fail-closed
  * so unverifiable tokens can't be silently accepted.
  */
 export declare class PublicKeyDirectory {
@@ -451,7 +485,7 @@ export declare class PublicKeyDirectory {
 /**
  * Verifies `PermitToken` signatures by looking up the matching
  * `PublicKeyBundle` in a `PublicKeyDirectory` via the envelope's
- * `key_id`. Fail-closed — any failure throws.
+ * `key_id`. Fail-closed, any failure throws.
  */
 export declare class DirectoryTokenVerifier {
   /**
@@ -467,7 +501,7 @@ export declare class DirectoryTokenVerifier {
    *
    * `enforceExpiry` (default `true`): reject verification if the
    * resolved bundle's `expires_at` is in the past. This is the
-   * correct-by-default posture for an authorization gate — a
+   * correct-by-default posture for an authorization gate, a
    * rotated-out keypair MUST NOT authorise new actions even if
    * its signature is still cryptographically valid. Pass
    * `enforceExpiry: false` for historical forensic verification
@@ -477,7 +511,7 @@ export declare class DirectoryTokenVerifier {
   verify(token: PermitTokenInput, signature: Buffer, enforceExpiry?: boolean | undefined | null): void
 }
 /**
- * Process-local invalidation broadcaster — default backend when no
+ * Process-local invalidation broadcaster, default backend when no
  * Redis broadcaster is configured.
  *
  * Subscribers created via `spawnInvalidationListener` receive every
@@ -504,12 +538,12 @@ export declare class InMemoryInvalidationBroadcaster {
 }
 /**
  * Opaque handle for a running listener task spawned by
- * `spawnInvalidationListener`. Integrator owns the lifecycle —
+ * `spawnInvalidationListener`. Integrator owns the lifecycle,
  * the task exits on its own when the broadcaster's channel closes;
  * call `abort()` to stop it sooner.
  */
 export declare class InvalidationListenerHandle {
-  /** Stop the listener. Idempotent — calling twice is a no-op. */
+  /** Stop the listener. Idempotent, calling twice is a no-op. */
   abort(): void
   /** True if the listener task has finished. */
   get isFinished(): boolean

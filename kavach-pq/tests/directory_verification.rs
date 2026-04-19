@@ -84,7 +84,7 @@ async fn verifier_rejects_when_directory_does_not_have_key() {
 
 #[tokio::test]
 async fn verifier_rejects_when_directory_returns_wrong_key_for_id() {
-    // Simulate a directory where the key_id maps to the wrong public key —
+    // Simulate a directory where the key_id maps to the wrong public key,
     // either because of a mistake or an active attack.
     let signing_kp = KavachKeyPair::generate().unwrap();
     let other_kp = KavachKeyPair::generate().unwrap();
@@ -158,7 +158,7 @@ async fn verifier_rejects_tampered_signature() {
 
     let token = sample_token("act");
     let mut sig = signer.sign(&token).unwrap();
-    // Flip a byte inside the envelope — this corrupts the JSON OR the
+    // Flip a byte inside the envelope, this corrupts the JSON OR the
     // embedded signature depending on where we land, but either way the
     // envelope must not pass verification.
     if let Some(last) = sig.last_mut() {

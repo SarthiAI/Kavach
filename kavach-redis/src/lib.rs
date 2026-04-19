@@ -1,21 +1,21 @@
-//! # Kavach — Redis backends
+//! # Kavach, Redis backends
 //!
 //! Distributed implementations of the three pluggable traits from
 //! `kavach-core`:
 //!
-//! - [`RedisRateLimitStore`] — sliding-window rate limits via Redis sorted sets.
-//! - [`RedisSessionStore`] — session state as JSON blobs with Redis TTL.
-//! - [`RedisInvalidationBroadcaster`] — cross-node session invalidation via
+//! - [`RedisRateLimitStore`], sliding-window rate limits via Redis sorted sets.
+//! - [`RedisSessionStore`], session state as JSON blobs with Redis TTL.
+//! - [`RedisInvalidationBroadcaster`], cross-node session invalidation via
 //!   Redis Pub/Sub, bridged into a local `tokio::sync::broadcast` channel so
 //!   it satisfies [`InvalidationBroadcaster::subscribe`](kavach_core::invalidation::InvalidationBroadcaster::subscribe).
 //!
-//! ## Failure semantics — fail closed
+//! ## Failure semantics, fail closed
 //!
 //! Every Redis error path surfaces as an `Err` up through the trait. The gate
 //! interprets this as fail-closed: rate-limit condition evaluates to `false`
 //! (policy does not match, default-deny kicks in); session `get` failures
 //! refuse the action upstream; broadcast `publish` failures **never** downgrade
-//! the local verdict — `Invalidate` still stands on the node that issued it.
+//! the local verdict, `Invalidate` still stands on the node that issued it.
 //!
 //! ## Connection management
 //!
@@ -42,7 +42,7 @@ pub use session_store::RedisSessionStore;
 
 /// Bounded wait on the initial [`redis::aio::ConnectionManager::new`] handshake.
 ///
-/// `ConnectionManager` is designed to retry forever — great for long-lived
+/// `ConnectionManager` is designed to retry forever, great for long-lived
 /// processes surviving transient Redis blips, catastrophic for start-up time
 /// when the URL is just wrong. Every `from_url` / `new` here wraps the
 /// handshake in a `tokio::time::timeout(CONNECT_TIMEOUT, ...)` so a bad URL

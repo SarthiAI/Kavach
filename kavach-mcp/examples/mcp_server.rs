@@ -77,7 +77,7 @@ fn build_kavach_layer() -> McpKavachLayer {
     // 2. Drift detection with defaults (geo, session age, device, behavior)
     let drift = Arc::new(DriftEvaluator::with_defaults());
 
-    // 3. Hard invariants — these cannot be overridden by policy
+    // 3. Hard invariants, these cannot be overridden by policy
     let invariants = Arc::new(InvariantSet::new(vec![
         Invariant::param_max("max_single_refund", "amount", 50_000.0),
         Invariant::max_actions_per_session("session_action_limit", 500),
@@ -128,14 +128,14 @@ async fn main() {
         Verdict::Permit(_) => {
             let result = execute_read_order("ORD-7890").await;
             kavach.record_success(&request).await;
-            println!("   PERMITTED — result: {}\n", result);
+            println!("   PERMITTED, result: {}\n", result);
         }
         Verdict::Refuse(reason) => {
-            println!("   REFUSED — {}\n", reason);
+            println!("   REFUSED, {}\n", reason);
         }
         Verdict::Invalidate(scope) => {
             kavach.handle_invalidation(&request, &scope).await;
-            println!("   INVALIDATED — {}\n", scope);
+            println!("   INVALIDATED, {}\n", scope);
         }
     }
 
@@ -158,14 +158,14 @@ async fn main() {
         Verdict::Permit(_) => {
             let result = execute_issue_refund("ORD-7890", 500.0).await;
             kavach.record_success(&request).await;
-            println!("   PERMITTED — result: {}\n", result);
+            println!("   PERMITTED, result: {}\n", result);
         }
         Verdict::Refuse(reason) => {
-            println!("   REFUSED — {}\n", reason);
+            println!("   REFUSED, {}\n", reason);
         }
         Verdict::Invalidate(scope) => {
             kavach.handle_invalidation(&request, &scope).await;
-            println!("   INVALIDATED — {}\n", scope);
+            println!("   INVALIDATED, {}\n", scope);
         }
     }
 
@@ -186,14 +186,14 @@ async fn main() {
 
     match kavach.check(&request).await {
         Verdict::Permit(_) => {
-            println!("   PERMITTED — this should not happen!\n");
+            println!("   PERMITTED, this should not happen!\n");
         }
         Verdict::Refuse(reason) => {
-            println!("   REFUSED — {}\n", reason);
+            println!("   REFUSED, {}\n", reason);
         }
         Verdict::Invalidate(scope) => {
             kavach.handle_invalidation(&request, &scope).await;
-            println!("   INVALIDATED — {}\n", scope);
+            println!("   INVALIDATED, {}\n", scope);
         }
     }
 
@@ -210,14 +210,14 @@ async fn main() {
 
     match kavach.check(&request).await {
         Verdict::Permit(_) => {
-            println!("   PERMITTED — this should not happen!\n");
+            println!("   PERMITTED, this should not happen!\n");
         }
         Verdict::Refuse(reason) => {
-            println!("   REFUSED — {}\n", reason);
+            println!("   REFUSED, {}\n", reason);
         }
         Verdict::Invalidate(scope) => {
             kavach.handle_invalidation(&request, &scope).await;
-            println!("   INVALIDATED — {}\n", scope);
+            println!("   INVALIDATED, {}\n", scope);
         }
     }
 
@@ -246,14 +246,14 @@ async fn main() {
 
     match kavach.check(&request).await {
         Verdict::Permit(_) => {
-            println!("   PERMITTED — drift detection may not catch this without session origin tracking\n");
+            println!("   PERMITTED, drift detection may not catch this without session origin tracking\n");
         }
         Verdict::Refuse(reason) => {
-            println!("   REFUSED — {}\n", reason);
+            println!("   REFUSED, {}\n", reason);
         }
         Verdict::Invalidate(scope) => {
             kavach.handle_invalidation(&request, &scope).await;
-            println!("   INVALIDATED — {}\n", scope);
+            println!("   INVALIDATED, {}\n", scope);
         }
     }
 

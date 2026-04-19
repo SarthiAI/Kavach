@@ -11,7 +11,7 @@ Example:
         # This only executes if the gate permits
         return {"status": "refunded", "amount": amount}
 
-    # Call it — Kavach evaluates before execution
+    # Call it, Kavach evaluates before execution
     result = await issue_refund(
         "ORD-123", 500.0,
         _principal_id="agent-bot",

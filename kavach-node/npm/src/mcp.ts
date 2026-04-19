@@ -18,7 +18,7 @@
  *
  * server.tool('issue_refund', { amount: z.number(), orderId: z.string() },
  *   async ({ amount, orderId }) => {
- *     // Gate the call — throws KavachRefused if blocked,
+ *     // Gate the call, throws KavachRefused if blocked,
  *     // KavachInvalidated if the session has been revoked.
  *     kavach.checkToolCall('issue_refund', { amount, orderId }, {
  *       callerId: 'agent-bot',
@@ -79,7 +79,7 @@ export interface SessionStore {
 }
 
 /**
- * Process-local session store — default backend for
+ * Process-local session store, default backend for
  * `McpKavachMiddleware`. Tracks revoked session ids in a `Set`.
  * All operations are synchronous; the interface signature allows
  * Promise returns so Redis-backed stores slot in without changes
@@ -129,7 +129,7 @@ export class McpKavachMiddleware {
    *
    * When the call carries a `sessionId`, the middleware fast-paths
    * a session-store `isInvalidated` check BEFORE building the gate
-   * context — a peer-revoked session surfaces as a
+   * context, a peer-revoked session surfaces as a
    * `KavachInvalidated` with `evaluator = "session_store"`.
    *
    * @param toolName - The MCP tool being called
@@ -154,7 +154,7 @@ export class McpKavachMiddleware {
    *
    * If the session has been invalidated through the session store,
    * this returns a synthesised Invalidate verdict with
-   * `evaluator = "session_store"` — the gate's own evaluator chain
+   * `evaluator = "session_store"`, the gate's own evaluator chain
    * is not run in that case, matching the Python middleware's
    * fast-path behaviour.
    */

@@ -1,7 +1,7 @@
 //! # Kavach Node.js Bindings
 //!
 //! napi-rs bridge that exposes kavach-core's Rust engine to Node.js/TypeScript.
-//! All evaluation logic runs in Rust — JS calls across the native addon boundary.
+//! All evaluation logic runs in Rust, JS calls across the native addon boundary.
 //!
 //! The compiled addon is loaded by the `kavach` npm package.
 
@@ -61,7 +61,7 @@ pub struct VerdictResult {
     /// `null` for Refuse / Invalidate.
     pub permit_token: Option<PermitTokenView>,
 
-    /// Convenience: signature bytes (or null) — same as `permit_token.signature`.
+    /// Convenience: signature bytes (or null), same as `permit_token.signature`.
     pub signature: Option<Buffer>,
 }
 
@@ -159,7 +159,7 @@ pub struct ActionContextInput {
     /// tolerant-mode `GeoLocationDrift`.
     pub origin_geo: Option<GeoLocationInput>,
     /// Explicit session-origin IP. When set, overrides the `ip`-derived
-    /// default (`session.origin_ip = env.ip`) — lets callers model
+    /// default (`session.origin_ip = env.ip`), lets callers model
     /// "session started from X, request from Y" for strict/tolerant
     /// `GeoLocationDrift`.
     pub origin_ip: Option<String>,
@@ -261,11 +261,11 @@ fn permit_token_from_input(input: &PermitTokenInput) -> Result<core::PermitToken
 
 // ─── KavachKeyPair + PublicKeyBundle ─────────────────────────────
 
-/// A Kavach keypair — ML-DSA-65 + ML-KEM-768 + Ed25519 + X25519.
+/// A Kavach keypair, ML-DSA-65 + ML-KEM-768 + Ed25519 + X25519.
 ///
 /// Holds *both* signing/decapsulation/secret keys and their public counterparts.
 /// Use `publicKeys()` to extract the safe-to-share `PublicKeyBundle` and
-/// share *that* with verifiers — never the keypair itself.
+/// share *that* with verifiers, never the keypair itself.
 #[napi]
 pub struct KavachKeyPair {
     inner: Arc<KavachKeyPairInner>,
@@ -315,7 +315,7 @@ impl KavachKeyPair {
         self.inner.is_expired()
     }
 
-    /// The safe-to-share half — share this with verifiers / KEM senders.
+    /// The safe-to-share half, share this with verifiers / KEM senders.
     #[napi]
     pub fn public_keys(&self) -> PublicKeyBundleView {
         PublicKeyBundleView::from(self.inner.public_keys())
@@ -372,7 +372,7 @@ impl From<PublicKeyBundleInner> for PublicKeyBundleView {
 
 // ─── PqTokenSigner class ─────────────────────────────────────────
 
-/// PQ token signer — wraps `kavach_pq::PqTokenSigner` and exposes
+/// PQ token signer, wraps `kavach_pq::PqTokenSigner` and exposes
 /// sign/verify across the FFI.
 ///
 /// Construct via `PqTokenSigner.pqOnly(...)` (ML-DSA-65 only) or
@@ -432,7 +432,7 @@ impl PqTokenSigner {
 
     /// Generate a fresh PQ-only signer (random ML-DSA-65 keypair).
     /// Convenience for tests / quick starts. For production key management
-    /// you'll want to persist the keypair — use `pqOnly(...)` instead.
+    /// you'll want to persist the keypair, use `pqOnly(...)` instead.
     #[napi(factory, js_name = "generatePqOnly")]
     pub fn generate_pq_only(key_id: Option<String>) -> Result<Self> {
         let kp = KavachKeyPairInner::generate()
@@ -662,7 +662,7 @@ fn bundle_view_to_inner(view: &PublicKeyBundleView) -> PublicKeyBundleInner {
 /// Each appended entry is signed (ML-DSA-65, plus Ed25519 in hybrid mode)
 /// and linked to the previous entry via a SHA-256 hash chain. Reordering,
 /// inserting, deleting, mutating, or splicing across modes is detected at
-/// `verify` time. The verifier's mode must match the chain's mode —
+/// `verify` time. The verifier's mode must match the chain's mode,
 /// `verify` and `verifyJsonl` refuse to silently accept a hybrid chain
 /// under a PQ-only verifier (and vice versa), closing the
 /// signature-downgrade surface.
@@ -786,34 +786,22 @@ pub struct KavachGate {
     policy_engine: Arc<core::PolicyEngine>,
 }
 
-#[napi]
+// Private helper shared by every KavachGate constructor / factory: takes a
+// deserialized `PolicySet` plus the public kwargs and builds the engine.
+// Keeps the post-deserialize wiring (drift detector swap, invariant
+// assembly, signer / broadcaster attachment) in one place so the TOML,
+// object, and JSON loaders all behave identically once the policy is parsed.
 impl KavachGate {
-    /// Create a new Kavach gate from TOML policy configuration.
-    ///
-    /// All evaluation logic runs in compiled Rust.
-    /// When a `tokenSigner` is supplied, every Permit verdict carries a
-    /// signed envelope on `verdict.signature` / `verdict.permitToken.signature`.
-    /// Sign failures fail closed (Refuse).
-    ///
-    /// `geoDriftMaxKm`: tolerance (km) for `GeoLocationDrift`. When unset,
-    /// any mid-session IP change is a Violation. When set, an IP change
-    /// within this distance downgrades to a Warning — requires both
-    /// `currentGeo` and `originGeo` to carry latitude/longitude. Missing
-    /// geo with a threshold set fails closed.
-    #[napi(constructor)]
-    pub fn new(
-        policy_toml: String,
+    fn build_from_policies(
+        policies: core::PolicySet,
         invariants: Option<Vec<InvariantInput>>,
         observe_only: Option<bool>,
         max_session_actions: Option<u32>,
         enable_drift: Option<bool>,
-        token_signer: Option<&PqTokenSigner>,
+        token_signer: Option<Arc<dyn CoreTokenSigner>>,
         geo_drift_max_km: Option<f64>,
-        broadcaster: Option<&InMemoryInvalidationBroadcaster>,
+        broadcaster: Option<Arc<dyn CoreInvalidationBroadcaster>>,
     ) -> Result<Self> {
-        let policies = core::PolicySet::from_toml(&policy_toml)
-            .map_err(|e| Error::from_reason(format!("policy parse error: {e}")))?;
-
         let policy_engine = Arc::new(core::PolicyEngine::new(policies));
 
         let mut evaluators: Vec<Arc<dyn Evaluator>> = vec![policy_engine.clone()];
@@ -855,12 +843,10 @@ impl KavachGate {
         };
 
         let mut gate = core::Gate::new(evaluators, config);
-        if let Some(signer) = token_signer {
-            let signer_arc: Arc<dyn CoreTokenSigner> = signer.inner.clone();
+        if let Some(signer_arc) = token_signer {
             gate = gate.with_token_signer(signer_arc);
         }
-        if let Some(bc) = broadcaster {
-            let bc_arc: Arc<dyn CoreInvalidationBroadcaster> = bc.inner.clone();
+        if let Some(bc_arc) = broadcaster {
             gate = gate.with_broadcaster(bc_arc);
         }
 
@@ -869,10 +855,150 @@ impl KavachGate {
             policy_engine,
         })
     }
+}
+
+#[napi]
+impl KavachGate {
+    /// Create a new Kavach gate from TOML policy configuration.
+    ///
+    /// This is the constructor invoked by `new KavachGate(...)` and routed
+    /// through `Gate.fromToml` / `Gate.fromFile` in the TS wrapper. For
+    /// object and JSON loading paths see `fromObject`, `fromJsonString`,
+    /// `fromJsonFile`.
+    ///
+    /// All evaluation logic runs in compiled Rust.
+    /// When a `tokenSigner` is supplied, every Permit verdict carries a
+    /// signed envelope on `verdict.signature` / `verdict.permitToken.signature`.
+    /// Sign failures fail closed (Refuse).
+    ///
+    /// `geoDriftMaxKm`: tolerance (km) for `GeoLocationDrift`. When unset,
+    /// any mid-session IP change is a Violation. When set, an IP change
+    /// within this distance downgrades to a Warning, requires both
+    /// `currentGeo` and `originGeo` to carry latitude/longitude. Missing
+    /// geo with a threshold set fails closed.
+    #[napi(constructor)]
+    pub fn new(
+        policy_toml: String,
+        invariants: Option<Vec<InvariantInput>>,
+        observe_only: Option<bool>,
+        max_session_actions: Option<u32>,
+        enable_drift: Option<bool>,
+        token_signer: Option<&PqTokenSigner>,
+        geo_drift_max_km: Option<f64>,
+        broadcaster: Option<&InMemoryInvalidationBroadcaster>,
+    ) -> Result<Self> {
+        let policies = core::PolicySet::from_toml(&policy_toml)
+            .map_err(|e| Error::from_reason(format!("policy parse error: {e}")))?;
+        Self::build_from_policies(
+            policies,
+            invariants,
+            observe_only,
+            max_session_actions,
+            enable_drift,
+            token_signer.map(|s| -> Arc<dyn CoreTokenSigner> { s.inner.clone() }),
+            geo_drift_max_km,
+            broadcaster.map(|b| -> Arc<dyn CoreInvalidationBroadcaster> { b.inner.clone() }),
+        )
+    }
+
+    /// Create a gate from a plain JS object matching the policy schema.
+    ///
+    /// Same vocabulary as the TOML format: top-level `policies` (or `policy`)
+    /// is an array of policy objects, each with `name`, `effect`, `conditions`,
+    /// optional `description`, optional `priority`. Each condition is an
+    /// object with one key naming the variant (`identity_kind`, `param_max`,
+    /// `rate_limit`, etc.) and the value carrying the payload.
+    ///
+    /// Typo'd / unknown field names throw a clear error instead of being
+    /// silently dropped (deny_unknown_fields contract from kavach-core's
+    /// serde derives). All other parameters are identical to `new`.
+    #[napi(factory)]
+    pub fn from_object(
+        policies: serde_json::Value,
+        invariants: Option<Vec<InvariantInput>>,
+        observe_only: Option<bool>,
+        max_session_actions: Option<u32>,
+        enable_drift: Option<bool>,
+        token_signer: Option<&PqTokenSigner>,
+        geo_drift_max_km: Option<f64>,
+        broadcaster: Option<&InMemoryInvalidationBroadcaster>,
+    ) -> Result<Self> {
+        let policy_set: core::PolicySet = serde_json::from_value(policies)
+            .map_err(|e| Error::from_reason(format!("policy object parse error: {e}")))?;
+        Self::build_from_policies(
+            policy_set,
+            invariants,
+            observe_only,
+            max_session_actions,
+            enable_drift,
+            token_signer.map(|s| -> Arc<dyn CoreTokenSigner> { s.inner.clone() }),
+            geo_drift_max_km,
+            broadcaster.map(|b| -> Arc<dyn CoreInvalidationBroadcaster> { b.inner.clone() }),
+        )
+    }
+
+    /// Create a gate from a JSON string carrying the policy schema.
+    ///
+    /// Same vocabulary as the TOML and object formats. Useful when the
+    /// policy crosses a wire boundary (HTTP body, message queue, config
+    /// service). Unknown fields throw a clear error.
+    #[napi(factory)]
+    pub fn from_json_string(
+        json_string: String,
+        invariants: Option<Vec<InvariantInput>>,
+        observe_only: Option<bool>,
+        max_session_actions: Option<u32>,
+        enable_drift: Option<bool>,
+        token_signer: Option<&PqTokenSigner>,
+        geo_drift_max_km: Option<f64>,
+        broadcaster: Option<&InMemoryInvalidationBroadcaster>,
+    ) -> Result<Self> {
+        let policy_set: core::PolicySet = serde_json::from_str(&json_string)
+            .map_err(|e| Error::from_reason(format!("policy JSON parse error: {e}")))?;
+        Self::build_from_policies(
+            policy_set,
+            invariants,
+            observe_only,
+            max_session_actions,
+            enable_drift,
+            token_signer.map(|s| -> Arc<dyn CoreTokenSigner> { s.inner.clone() }),
+            geo_drift_max_km,
+            broadcaster.map(|b| -> Arc<dyn CoreInvalidationBroadcaster> { b.inner.clone() }),
+        )
+    }
+
+    /// Create a gate from a JSON policy file on disk.
+    ///
+    /// Reads the file as text and forwards to `fromJsonString`. Same schema
+    /// rules; unknown fields throw.
+    #[napi(factory)]
+    pub fn from_json_file(
+        path: String,
+        invariants: Option<Vec<InvariantInput>>,
+        observe_only: Option<bool>,
+        max_session_actions: Option<u32>,
+        enable_drift: Option<bool>,
+        token_signer: Option<&PqTokenSigner>,
+        geo_drift_max_km: Option<f64>,
+        broadcaster: Option<&InMemoryInvalidationBroadcaster>,
+    ) -> Result<Self> {
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| Error::from_reason(format!("cannot read JSON policy file '{path}': {e}")))?;
+        Self::from_json_string(
+            content,
+            invariants,
+            observe_only,
+            max_session_actions,
+            enable_drift,
+            token_signer,
+            geo_drift_max_km,
+            broadcaster,
+        )
+    }
 
     /// Hot-reload the policy set from a fresh TOML string.
     ///
-    /// Parse errors throw and the previous good set stays in place — never
+    /// Parse errors throw and the previous good set stays in place, never
     /// wipe a running engine on a bad reload. An empty TOML is intentionally
     /// valid (= default-deny everything; useful as a kill-switch).
     #[napi]
@@ -888,7 +1014,7 @@ impl KavachGate {
     /// Crosses into Rust for all evaluation: policy, drift, invariants.
     /// When the gate was configured with `observeOnly: true`, the full
     /// evaluator chain still runs and real Refuse/Invalidate verdicts
-    /// still reach the audit sink and the broadcaster — but the
+    /// still reach the audit sink and the broadcaster, but the
     /// caller-facing verdict is always Permit. Operators get full
     /// visibility of what the gate *would* do without production
     /// traffic being refused during a rollout.
@@ -1004,16 +1130,16 @@ fn serialize_sealed(payload: &EncryptedPayload) -> Result<Vec<u8>> {
 /// A hybrid-encrypted, PQ-signed channel between two Kavach services.
 ///
 /// Each side constructs a channel from their own `KavachKeyPair` (secret
-/// material — never share) and the remote party's `PublicKeyBundle`
+/// material, never share) and the remote party's `PublicKeyBundle`
 /// (safe to share). Sealed payloads are opaque `Buffer`s carrying the
 /// full envelope; store or transmit them anywhere.
 ///
 /// Three flows:
 /// - `sendSigned(data, contextId, correlationId)` / `receiveSigned(sealed,
-///   expectedContextId)` — sign + encrypt, with replay protection and
+///   expectedContextId)`, sign + encrypt, with replay protection and
 ///   context binding. Throws on tamper, wrong recipient, replay, or
 ///   context mismatch.
-/// - `sendData(data)` / `receiveData(sealed)` — encryption only, no
+/// - `sendData(data)` / `receiveData(sealed)`, encryption only, no
 ///   signing.
 /// - `localKeyId` / `remoteKeyId` getters for diagnostics.
 #[napi]
@@ -1045,7 +1171,7 @@ impl SecureChannel {
     }
 
     /// Sign + encrypt `data`, binding it to `contextId` and
-    /// `correlationId`. Returns opaque sealed bytes — pass them to the
+    /// `correlationId`. Returns opaque sealed bytes, pass them to the
     /// remote side's `receiveSigned`.
     #[napi]
     pub fn send_signed(
@@ -1099,7 +1225,7 @@ impl SecureChannel {
 
 // ─── Public-key directory ────────────────────────────────────────
 
-/// Backing store for [`PublicKeyDirectory`] — tracks the concrete
+/// Backing store for [`PublicKeyDirectory`], tracks the concrete
 /// impl so type-specific ops (insert/remove/reload) stay reachable.
 enum DirectoryKind {
     InMemory(Arc<InMemoryPublicKeyDirectoryInner>),
@@ -1109,17 +1235,17 @@ enum DirectoryKind {
 /// Public-key distribution surface for downstream verifiers.
 ///
 /// Three backings:
-/// - `PublicKeyDirectory.inMemory(bundles)` — programmatic store,
+/// - `PublicKeyDirectory.inMemory(bundles)`, programmatic store,
 ///   mutable via `insert` / `remove`.
-/// - `PublicKeyDirectory.fromFile(path)` — unsigned JSON array on
+/// - `PublicKeyDirectory.fromFile(path)`, unsigned JSON array on
 ///   disk. Safe only when the file is local to the verifier.
 /// - `PublicKeyDirectory.fromSignedFile(path, rootMlDsaVerifyingKey)`
-///   — root-signed manifest. Any file whose ML-DSA-65 signature
+///  , root-signed manifest. Any file whose ML-DSA-65 signature
 ///   doesn't verify against `rootMlDsaVerifyingKey` is rejected at
 ///   load time. Use this for cross-host trust.
 ///
 /// `fetch(keyId)` throws on any failure (NotFound /
-/// BackendUnavailable / RootSignatureInvalid / Corrupt) — fail-closed
+/// BackendUnavailable / RootSignatureInvalid / Corrupt), fail-closed
 /// so unverifiable tokens can't be silently accepted.
 #[napi]
 pub struct PublicKeyDirectory {
@@ -1260,7 +1386,7 @@ impl PublicKeyDirectory {
 
 /// Verifies `PermitToken` signatures by looking up the matching
 /// `PublicKeyBundle` in a `PublicKeyDirectory` via the envelope's
-/// `key_id`. Fail-closed — any failure throws.
+/// `key_id`. Fail-closed, any failure throws.
 #[napi]
 pub struct DirectoryTokenVerifier {
     inner: Arc<DirectoryTokenVerifierInner>,
@@ -1289,7 +1415,7 @@ impl DirectoryTokenVerifier {
     ///
     /// `enforceExpiry` (default `true`): reject verification if the
     /// resolved bundle's `expires_at` is in the past. This is the
-    /// correct-by-default posture for an authorization gate — a
+    /// correct-by-default posture for an authorization gate, a
     /// rotated-out keypair MUST NOT authorise new actions even if
     /// its signature is still cryptographically valid. Pass
     /// `enforceExpiry: false` for historical forensic verification
@@ -1349,7 +1475,7 @@ impl From<CoreInvalidationScope> for InvalidationScopeView {
     }
 }
 
-/// Process-local invalidation broadcaster — default backend when no
+/// Process-local invalidation broadcaster, default backend when no
 /// Redis broadcaster is configured.
 ///
 /// Subscribers created via `spawnInvalidationListener` receive every
@@ -1420,7 +1546,7 @@ impl InMemoryInvalidationBroadcaster {
 }
 
 /// Opaque handle for a running listener task spawned by
-/// `spawnInvalidationListener`. Integrator owns the lifecycle —
+/// `spawnInvalidationListener`. Integrator owns the lifecycle,
 /// the task exits on its own when the broadcaster's channel closes;
 /// call `abort()` to stop it sooner.
 #[napi]
@@ -1430,7 +1556,7 @@ pub struct InvalidationListenerHandle {
 
 #[napi]
 impl InvalidationListenerHandle {
-    /// Stop the listener. Idempotent — calling twice is a no-op.
+    /// Stop the listener. Idempotent, calling twice is a no-op.
     #[napi]
     pub fn abort(&self) {
         if let Ok(mut guard) = self.handle.lock() {
@@ -1457,7 +1583,7 @@ impl InvalidationListenerHandle {
 /// `callback` is any JS function taking a single
 /// `InvalidationScopeView` argument. The callback runs on the Node
 /// event loop (ThreadsafeFunction); exceptions thrown inside the
-/// callback do NOT stop the listener — they surface through the
+/// callback do NOT stop the listener, they surface through the
 /// napi error strategy.
 ///
 /// Returns an `InvalidationListenerHandle`; call `.abort()` to stop
@@ -1478,7 +1604,7 @@ pub fn spawn_invalidation_listener(
             let tsfn = tsfn.clone();
             async move {
                 let view = InvalidationScopeView::from(scope);
-                // NonBlocking — don't let a slow JS callback back-pressure
+                // NonBlocking, don't let a slow JS callback back-pressure
                 // the broadcaster. Matches the Python binding's "fire and
                 // log on error" contract.
                 tsfn.call(Ok(view), ThreadsafeFunctionCallMode::NonBlocking);

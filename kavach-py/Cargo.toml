@@ -3,7 +3,7 @@ name = "kavach-py"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Python bindings for Kavach — compiled Rust engine exposed via PyO3"
+description = "Python bindings for Kavach, compiled Rust engine exposed via PyO3"
 
 [lib]
 name = "_kavach_engine"
@@ -14,6 +14,7 @@ kavach-core = { workspace = true }
 kavach-pq = { workspace = true }
 kavach-redis = { workspace = true }
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
+pythonize = "0.22"
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }

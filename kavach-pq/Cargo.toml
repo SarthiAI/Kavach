@@ -3,7 +3,7 @@ name = "kavach-pq"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Post-quantum transport security — ML-KEM key encapsulation, ML-DSA signatures, hybrid channels, verdict signing"
+description = "Post-quantum transport security, ML-KEM key encapsulation, ML-DSA signatures, hybrid channels, verdict signing"
 
 [dependencies]
 kavach-core = { workspace = true }
@@ -28,7 +28,7 @@ chacha20poly1305 = "0.10"     # Symmetric AEAD after key exchange
 # Utilities
 rand_core = "0.10"
 # x25519-dalek 2 / ed25519-dalek 2 still use rand_core 0.6 traits. We keep
-# this alongside the 0.10 we use for ml-kem — Cargo lets both majors coexist.
+# this alongside the 0.10 we use for ml-kem, Cargo lets both majors coexist.
 rand_core_06 = { package = "rand_core", version = "0.6", features = ["getrandom"] }
 getrandom = "0.3"
 sha2 = "0.10"
@@ -37,7 +37,7 @@ hkdf = "0.12"
 zeroize = { version = "1", features = ["derive"] }  # Secure memory clearing
 hybrid-array = "0.4"
 
-# Optional — HTTP-backed PublicKeyDirectory (feature `http`).
+# Optional, HTTP-backed PublicKeyDirectory (feature `http`).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"], optional = true }
 
 [features]

@@ -3,7 +3,7 @@ name = "kavach-http"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Kavach HTTP middleware for Axum/Tower — gate every API endpoint"
+description = "Kavach HTTP middleware for Axum/Tower, gate every API endpoint"
 
 [dependencies]
 kavach-core = { workspace = true }
@@ -15,7 +15,7 @@ tokio = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
-# Tower Service/Layer integration — opt-in so users who don't need it
+# Tower Service/Layer integration, opt-in so users who don't need it
 # aren't forced to pull these dependencies.
 tower = { version = "0.5", optional = true, features = ["util"] }
 http = { version = "1", optional = true }
@@ -24,7 +24,7 @@ http-body-util = { version = "0.1", optional = true }
 bytes = { version = "1", optional = true }
 pin-project-lite = { version = "0.2", optional = true }
 
-# Actix-web integration — opt-in (separate dep tree from Tower/Axum).
+# Actix-web integration, opt-in (separate dep tree from Tower/Axum).
 actix-web = { version = "4", optional = true, default-features = false, features = ["macros"] }
 futures-util = { version = "0.3", optional = true }
 

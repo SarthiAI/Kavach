@@ -154,7 +154,7 @@ pub struct SessionState {
     pub action_count: u64,
 
     /// History of action names taken in this session (most recent last).
-    /// Kept bounded — integration layer decides the window size.
+    /// Kept bounded, integration layer decides the window size.
     #[serde(default)]
     pub action_history: Vec<String>,
 
@@ -210,7 +210,7 @@ impl Default for SessionState {
     }
 }
 
-/// Environment context — where and how the action is happening.
+/// Environment context, where and how the action is happening.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EnvContext {
     /// Current IP address of the caller.

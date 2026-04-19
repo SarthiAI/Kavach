@@ -2,7 +2,7 @@
 //!
 //! Demonstrates the production wiring: a Router with two routes, wrapped in
 //! `KavachLayer`. The example drives the router via `ServiceExt::oneshot`
-//! so it can run without binding to a real port — keeps the example self-
+//! so it can run without binding to a real port, keeps the example self-
 //! contained and CI-friendly.
 //!
 //! Run with:

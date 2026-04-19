@@ -44,7 +44,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-/// Default cache TTL — fetch at most every 5 minutes.
+/// Default cache TTL, fetch at most every 5 minutes.
 const DEFAULT_TTL: Duration = Duration::from_secs(300);
 
 /// Default HTTP client request timeout. Short enough that a hanging key
@@ -53,7 +53,7 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// HTTP-backed public key directory with ETag caching.
 ///
-/// Clone is cheap — the inner state is `Arc`-wrapped so clones share the
+/// Clone is cheap, the inner state is `Arc`-wrapped so clones share the
 /// same cache + HTTP client.
 #[derive(Clone)]
 pub struct HttpPublicKeyDirectory {
@@ -83,7 +83,7 @@ impl HttpPublicKeyDirectory {
     ///
     /// `root_verifying_key` is the ML-DSA-65 encoded verifying key of the
     /// root authority. Any manifest whose signature doesn't verify against
-    /// it is rejected — cache is left unchanged.
+    /// it is rejected, cache is left unchanged.
     ///
     /// The first fetch happens lazily on the first `fetch(key_id)` call, so
     /// construction never performs I/O and cannot fail on network issues.
@@ -118,7 +118,7 @@ impl HttpPublicKeyDirectory {
         }
     }
 
-    /// Inject a pre-configured `reqwest::Client` — useful for custom
+    /// Inject a pre-configured `reqwest::Client`, useful for custom
     /// timeouts, TLS roots, authentication headers, or proxies.
     pub fn with_http_client(mut self, client: Client) -> Self {
         if let Some(inner) = Arc::get_mut(&mut self.inner) {
@@ -299,7 +299,7 @@ impl PublicKeyDirectory for HttpPublicKeyDirectory {
                 .ok_or_else(|| KeyDirectoryError::NotFound(key_id.to_string()));
         }
 
-        // Cache is cold or stale — try to refresh.
+        // Cache is cold or stale, try to refresh.
         match self.refresh().await {
             Ok(()) => self
                 .lookup_in_cache(key_id)
@@ -312,7 +312,7 @@ impl PublicKeyDirectory for HttpPublicKeyDirectory {
                     tracing::warn!(
                         error = %err,
                         url = %self.inner.url,
-                        "key directory refresh failed — serving stale cache"
+                        "key directory refresh failed, serving stale cache"
                     );
                     Ok(bundle)
                 } else {
@@ -334,7 +334,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    // Minimal HTTP/1.1 stub — one request per connection, honors
+    // Minimal HTTP/1.1 stub, one request per connection, honors
     // If-None-Match for the ETag path. Avoids pulling in a mock library
     // just for these tests.
     struct HttpStub {
@@ -442,7 +442,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        // Cache is now stale — the next fetch re-checks with If-None-Match
+        // Cache is now stale, the next fetch re-checks with If-None-Match
         // and the server returns 304. The count advances (one HTTP hit) but
         // bundle count stays the same.
         let got = dir.fetch("k-1").await.unwrap();
@@ -493,7 +493,7 @@ mod tests {
         }
 
         // Cache is stale, refresh will fail with BackendUnavailable, but
-        // the stale cache contains the key — so we return the stale bundle.
+        // the stale cache contains the key, so we return the stale bundle.
         let got = warm_dir.fetch("k-1").await.unwrap();
         assert_eq!(got.id, "k-1");
     }
@@ -544,7 +544,7 @@ mod tests {
         let body = serde_json::to_vec(&manifest).unwrap();
         let stub = start_stub(body, "\"vS1\"", false).await;
 
-        // Pin the imposter's VK — signature verify must fail, cache not
+        // Pin the imposter's VK, signature verify must fail, cache not
         // populated, fetch errors.
         let dir = HttpPublicKeyDirectory::signed(
             bundles_url(&stub),
@@ -566,7 +566,7 @@ mod tests {
         dir.fetch("k-1").await.unwrap();
         assert_eq!(stub.hit_count.load(Ordering::SeqCst), 1);
 
-        // TTL would normally prevent any refetch — reload() bypasses it.
+        // TTL would normally prevent any refetch, reload() bypasses it.
         dir.reload().await.unwrap();
         assert_eq!(stub.hit_count.load(Ordering::SeqCst), 2);
     }

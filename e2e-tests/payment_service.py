@@ -1,4 +1,4 @@
-"""FastAPI payment-service — verifies signed permits, then "processes" refunds.
+"""FastAPI payment-service, verifies signed permits, then "processes" refunds.
 
 Runs on 127.0.0.1:8002. One endpoint:
 
@@ -55,7 +55,7 @@ class RefundResponse(BaseModel):
 
 
 def build_app(directory_path: Path, root_vk_path: Path, hybrid: bool = True) -> FastAPI:
-    """Load the signed directory + build the verifier. One-time setup —
+    """Load the signed directory + build the verifier. One-time setup,
     everything after is per-request."""
     root_vk = root_vk_path.read_bytes()
     directory = PublicKeyDirectory.from_signed_file(str(directory_path), root_vk)
@@ -90,7 +90,7 @@ def build_app(directory_path: Path, root_vk_path: Path, hybrid: bool = True) -> 
             log.warning("refund rejected: missing permit / signature")
             raise HTTPException(status_code=401, detail="permit token required")
 
-        # (2) Token expiry. Signature verification alone won't catch this —
+        # (2) Token expiry. Signature verification alone won't catch this,
         # an attacker can replay a legitimately-signed token from last week.
         # Every downstream service *must* check expires_at itself.
         now = int(time.time())
@@ -102,7 +102,7 @@ def build_app(directory_path: Path, root_vk_path: Path, hybrid: bool = True) -> 
             raise HTTPException(status_code=401, detail="permit expired")
 
         # (3) Action binding. The signature covers `action_name` among
-        # other fields — so a token for `read_order` can't be replayed on
+        # other fields, so a token for `read_order` can't be replayed on
         # a `issue_refund` endpoint. Belt-and-braces check before the
         # crypto verify confirms it.
         if req.permit.action_name != "issue_refund":
@@ -114,7 +114,7 @@ def build_app(directory_path: Path, root_vk_path: Path, hybrid: bool = True) -> 
 
         # (4) Crypto verify via the directory. If the signing key isn't in
         # the directory, the signature is forged, or the envelope algorithm
-        # mismatches our verifier mode, this raises — we fail closed.
+        # mismatches our verifier mode, this raises, we fail closed.
         token = PermitToken(
             token_id=req.permit.token_id,
             evaluation_id=req.permit.evaluation_id,
@@ -132,7 +132,7 @@ def build_app(directory_path: Path, root_vk_path: Path, hybrid: bool = True) -> 
         log.info("✓ permit verified (key_id=%s)", req.permit.key_id)
 
         # (5) Process the refund. In a real service this is where Stripe
-        # or whoever gets called — we just log and return.
+        # or whoever gets called, we just log and return.
         log.info("✓ refund processed: %.2f → order %s", req.amount, req.order_id)
         return RefundResponse(
             ok=True,
@@ -146,7 +146,7 @@ def build_app(directory_path: Path, root_vk_path: Path, hybrid: bool = True) -> 
         """Re-read the signed directory file from disk and rebuild the
         verifier. Use this after the ops team rotates / revokes keys and
         writes a new directory.json. Old in-flight verifications already
-        in progress finish against the previous verifier — new calls pick
+        in progress finish against the previous verifier, new calls pick
         up the fresh one immediately.
         """
         try:

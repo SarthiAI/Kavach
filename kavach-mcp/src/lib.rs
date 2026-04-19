@@ -107,7 +107,7 @@ pub enum GuardedResult {
         evaluator: String,
     },
 
-    /// Session was invalidated — caller must re-authenticate.
+    /// Session was invalidated, caller must re-authenticate.
     Invalidated { reason: String },
 
     /// Tool execution failed (gate permitted, but tool errored).
@@ -116,7 +116,7 @@ pub enum GuardedResult {
 
 /// Converts an MCP tool request into a Kavach ActionContext.
 ///
-/// This is the thin translation layer — it maps MCP-specific concepts
+/// This is the thin translation layer, it maps MCP-specific concepts
 /// to Kavach's domain-agnostic context.
 pub fn to_action_context(request: &McpToolRequest, session_state: &SessionState) -> ActionContext {
     // Build principal from caller info
@@ -163,7 +163,7 @@ pub fn to_action_context(request: &McpToolRequest, session_state: &SessionState)
 ///     GuardedResult::Invalidated { reason } => return invalidate_session(reason),
 ///     GuardedResult::Error(e) => return error_response(e),
 /// }
-/// // If we reach here, the gate permitted — now execute the tool
+/// // If we reach here, the gate permitted, now execute the tool
 /// ```
 pub async fn evaluate_tool_call(
     gate: &Gate,
@@ -316,7 +316,7 @@ impl McpKavachLayer {
                 tracing::warn!(
                     session_id = %session_id,
                     error = %err,
-                    "session store unavailable — refusing tool call"
+                    "session store unavailable, refusing tool call"
                 );
                 Verdict::Refuse(kavach_core::RefuseReason {
                     evaluator: "mcp_session".to_string(),
@@ -329,7 +329,7 @@ impl McpKavachLayer {
     }
 
     /// Record a successful tool execution in the session. Errors from the
-    /// session store are logged and swallowed — recording is best-effort
+    /// session store are logged and swallowed, recording is best-effort
     /// and must not propagate to application code.
     pub async fn record_success(&self, request: &McpToolRequest) {
         if let Some(session_id) = &request.session_id {
@@ -348,7 +348,7 @@ impl McpKavachLayer {
     }
 
     /// Handle session invalidation. Best-effort: errors are logged, not
-    /// returned — the gate has already made its decision by the time this
+    /// returned, the gate has already made its decision by the time this
     /// is called.
     pub async fn handle_invalidation(
         &self,

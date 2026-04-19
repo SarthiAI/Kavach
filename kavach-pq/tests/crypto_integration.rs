@@ -1,7 +1,7 @@
 //! Integration tests for the post-quantum crypto layer.
 //!
 //! These tests verify that the ML-DSA/ML-KEM/ChaCha20-Poly1305 pipeline
-//! actually performs real cryptography — not just structure-shuffling —
+//! actually performs real cryptography, not just structure-shuffling,
 //! by checking the security properties any real crypto library must satisfy:
 //!
 //! - **Sign/verify roundtrip** succeeds for an honest signer.
@@ -64,7 +64,7 @@ fn ml_dsa_verify_fails_with_wrong_key() {
     let kp1 = KavachKeyPair::generate().unwrap();
     let kp2 = KavachKeyPair::generate().unwrap();
     let signer = Signer::new(kp1.ml_dsa_signing_key.clone(), kp1.id.clone());
-    // Verifier holds kp2's verifying key — signature from kp1 must not verify.
+    // Verifier holds kp2's verifying key, signature from kp1 must not verify.
     let verifier = Verifier::new(kp2.ml_dsa_verifying_key.clone());
 
     let signed = signer.sign(b"permit").unwrap();
@@ -102,7 +102,7 @@ fn hybrid_verify_fails_if_ed25519_signature_missing() {
     );
 
     let signed = signer_pq_only.sign(b"payload").unwrap();
-    // PQ-only payload has no Ed25519 sig — hybrid verifier must reject.
+    // PQ-only payload has no Ed25519 sig, hybrid verifier must reject.
     assert!(
         verifier_hybrid.verify(&signed).is_err(),
         "hybrid verifier must reject PQ-only signature"
@@ -123,7 +123,7 @@ fn hybrid_verify_fails_if_ed25519_signature_tampered() {
     );
 
     let mut signed = signer.sign(b"payload").unwrap();
-    // Tamper Ed25519 signature — ML-DSA still valid, but hybrid must fail.
+    // Tamper Ed25519 signature, ML-DSA still valid, but hybrid must fail.
     if let Some(ed) = signed.ed25519_signature.as_mut() {
         ed[0] ^= 0x01;
     }
@@ -159,7 +159,7 @@ fn ml_kem_encrypt_not_a_passthrough() {
             .encrypted_data
             .windows(plaintext.len())
             .any(|w| w == plaintext),
-        "ciphertext leaked plaintext — AEAD not actually encrypting"
+        "ciphertext leaked plaintext, AEAD not actually encrypting"
     );
 }
 
@@ -171,7 +171,7 @@ fn aead_detects_ciphertext_tamper() {
         kavach_pq::encrypt::Decryptor::new(kp.ml_kem_decapsulation_key.clone(), kp.id.clone());
 
     let mut payload = encryptor.encrypt(b"shared verdict").expect("encrypt");
-    // Flip a byte in the ciphertext — ChaCha20-Poly1305 tag must fail.
+    // Flip a byte in the ciphertext, ChaCha20-Poly1305 tag must fail.
     payload.encrypted_data[0] ^= 0xff;
     assert!(
         decryptor.decrypt(&payload).is_err(),
@@ -468,7 +468,7 @@ fn audit_chain_detects_tamper() {
             context_snapshot: None,
         };
         chain.append(&entry).expect("append");
-        // Prove the value type parses as a valid Verdict — smoke only:
+        // Prove the value type parses as a valid Verdict, smoke only:
         let _v: Option<Verdict> = None;
     }
 
@@ -488,7 +488,7 @@ fn audit_chain_detects_tamper() {
 /// A hybrid chain MUST NOT verify under a PQ-only verifier. If the verifier
 /// silently accepted the hybrid chain (ignoring the Ed25519 signatures),
 /// an attacker who can forge only the ML-DSA-65 signatures could pass
-/// off forged entries as authentic — a classic downgrade. This test pins
+/// off forged entries as authentic, a classic downgrade. This test pins
 /// the fail-closed behavior introduced when we added `ChainMode` enforcement
 /// to `verify_chain`.
 #[test]
@@ -573,7 +573,7 @@ fn audit_chain_rejects_mode_downgrade() {
     // --- Spliced mode mix must be rejected up-front ---
     let mut spliced = hybrid_entries.clone();
     // Strip Ed25519 sig from the second entry, then re-stitch the hash chain
-    // minimally. We don't have to produce a valid chain — `detect_mode` runs
+    // minimally. We don't have to produce a valid chain, `detect_mode` runs
     // before signature checks and must flag this first.
     spliced[1].signed_payload.ed25519_signature = None;
     let err = detect_mode(&spliced).expect_err("mixed-mode chain must be rejected");

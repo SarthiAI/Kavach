@@ -4,16 +4,17 @@
 
 Kavach is a library that separates *possession of credentials* from *permission to act*. Every action your system is about to take (an API call, an MCP tool invocation, a database write, an LLM function call) passes through a gate. The gate evaluates the action in context and returns one of three verdicts: `Permit`, `Refuse`, or `Invalidate`. The action cannot run unless the gate produced a `Permit`.
 
-Rust's type system enforces this. The only type that can be executed is `Guarded<A>`, and `Guarded<A>` has no public constructor: the sole way to build one is to hand `Gate::guard` an action and have every evaluator permit. Code that forgets the gate does not compile.
+In Rust, the type system enforces this. The only type that can be executed is `Guarded<A>`, and `Guarded<A>` has no public constructor: the sole way to build one is to hand `Gate::guard` an action and have every evaluator permit. Code that forgets the gate does not compile. The Python and Node SDKs preserve the same contract at runtime: a `Verdict` only becomes a `Permit` when every evaluator agreed, and `Gate.check` raises `Refused` or `Invalidated` if not.
 
-Kavach ships in six crates:
+Kavach ships in seven crates:
 
 - `kavach-core`, the gate, evaluators, policy engine, drift detection, invariants.
 - `kavach-pq`, post-quantum crypto (ML-DSA-65, ML-KEM-768, Ed25519, X25519, ChaCha20-Poly1305), signed permit tokens, signed audit chains, secure channel.
-- `kavach-http`, Axum / Tower middleware.
+- `kavach-http`, Axum / Tower middleware and an Actix adapter.
 - `kavach-mcp`, MCP tool-call gating.
 - `kavach-py`, the Python SDK (PyO3).
 - `kavach-node`, the TypeScript SDK (napi-rs).
+- `kavach-redis`, Redis-backed stores for rate limits, sessions, and cross-node invalidation broadcast.
 
 ## The problem
 

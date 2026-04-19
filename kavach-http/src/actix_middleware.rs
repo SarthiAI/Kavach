@@ -13,7 +13,7 @@
 //!   session failures), and a JSON body describing the refusal.
 //! - **Invalidate** → short-circuits with `401 Unauthorized`.
 //!
-//! The response body type is [`EitherBody<B>`] — `Left(B)` on permit (the
+//! The response body type is [`EitherBody<B>`], `Left(B)` on permit (the
 //! inner service's body passed through), `Right(BoxBody)` on refuse /
 //! invalidate (Kavach-generated JSON body).
 //!
@@ -75,7 +75,7 @@ impl KavachActixMiddleware {
     }
 
     /// Configure the maximum request body bytes the middleware will buffer
-    /// for gate evaluation. Bodies larger than this are **not** parsed —
+    /// for gate evaluation. Bodies larger than this are **not** parsed,
     /// the gate sees `body = None`, and any invariant that depends on body
     /// params should already be backed by upstream size limits.
     pub fn with_max_buffered_body_bytes(mut self, limit: usize) -> Self {
@@ -140,7 +140,7 @@ where
 
             // Reattach the buffered body as the request payload so the inner
             // service still sees the bytes. If we failed to buffer, pass an
-            // empty payload — bodies larger than the cap are the caller's
+            // empty payload, bodies larger than the cap are the caller's
             // responsibility to size-limit upstream.
             let bytes_for_payload = buffered.clone().unwrap_or_default();
             req.set_payload(bytes_to_payload(bytes_for_payload));

@@ -144,7 +144,7 @@ async fn main() {
     if http_gate.should_gate(&req) {
         println!("   Gating...");
     } else {
-        println!("   SKIPPED — excluded path, passes through\n");
+        println!("   SKIPPED, excluded path, passes through\n");
     }
 
     // ── 2. GET /api/v1/orders (read, not gated in mutations-only) ─
@@ -154,13 +154,13 @@ async fn main() {
     if http_gate.should_gate(&req) {
         println!("   Gating...");
     } else {
-        println!("   SKIPPED — GET requests pass through (gate_mutations_only=true)");
+        println!("   SKIPPED, GET requests pass through (gate_mutations_only=true)");
     }
     println!("   Action would be: {}\n", req.derive_action_name());
 
     // ── 3. POST /api/v1/refunds (support agent, small amount) ────
 
-    println!("3. POST /api/v1/refunds — support agent, ₹2,000");
+    println!("3. POST /api/v1/refunds, support agent, ₹2,000");
     let req = make_request(
         "POST",
         "/api/v1/refunds",
@@ -180,17 +180,17 @@ async fn main() {
                 println!("   PERMITTED (token: {})\n", token.token_id);
             }
             Verdict::Refuse(reason) => {
-                println!("   REFUSED — {}\n", reason);
+                println!("   REFUSED, {}\n", reason);
             }
             Verdict::Invalidate(scope) => {
-                println!("   INVALIDATED — {}\n", scope);
+                println!("   INVALIDATED, {}\n", scope);
             }
         }
     }
 
     // ── 4. POST /api/v1/refunds (support agent, too large) ──────
 
-    println!("4. POST /api/v1/refunds — support agent, ₹75,000 (over limit)");
+    println!("4. POST /api/v1/refunds, support agent, ₹75,000 (over limit)");
     let req = make_request(
         "POST",
         "/api/v1/refunds",
@@ -206,20 +206,20 @@ async fn main() {
     if http_gate.should_gate(&req) {
         match http_gate.evaluate(&req, &session).await {
             Verdict::Permit(_) => {
-                println!("   PERMITTED — unexpected!\n");
+                println!("   PERMITTED, unexpected!\n");
             }
             Verdict::Refuse(reason) => {
-                println!("   REFUSED — {}\n", reason);
+                println!("   REFUSED, {}\n", reason);
             }
             Verdict::Invalidate(scope) => {
-                println!("   INVALIDATED — {}\n", scope);
+                println!("   INVALIDATED, {}\n", scope);
             }
         }
     }
 
     // ── 5. DELETE /api/v1/orders/123 (admin) ─────────────────────
 
-    println!("5. DELETE /api/v1/orders/123 — admin user");
+    println!("5. DELETE /api/v1/orders/123, admin user");
     let req = make_request("DELETE", "/api/v1/orders/123", "admin_raj", "admin", None);
     println!("   Action derived: {}", req.derive_action_name());
 
@@ -229,17 +229,17 @@ async fn main() {
                 println!("   PERMITTED (token: {})\n", token.token_id);
             }
             Verdict::Refuse(reason) => {
-                println!("   REFUSED — {}\n", reason);
+                println!("   REFUSED, {}\n", reason);
             }
             Verdict::Invalidate(scope) => {
-                println!("   INVALIDATED — {}\n", scope);
+                println!("   INVALIDATED, {}\n", scope);
             }
         }
     }
 
     // ── 6. DELETE /api/v1/orders/456 (non-admin, should fail) ────
 
-    println!("6. DELETE /api/v1/orders/456 — regular support agent (not admin)");
+    println!("6. DELETE /api/v1/orders/456, regular support agent (not admin)");
     let req = make_request(
         "DELETE",
         "/api/v1/orders/456",
@@ -251,20 +251,20 @@ async fn main() {
     if http_gate.should_gate(&req) {
         match http_gate.evaluate(&req, &session).await {
             Verdict::Permit(_) => {
-                println!("   PERMITTED — unexpected!\n");
+                println!("   PERMITTED, unexpected!\n");
             }
             Verdict::Refuse(reason) => {
-                println!("   REFUSED — {}\n", reason);
+                println!("   REFUSED, {}\n", reason);
             }
             Verdict::Invalidate(scope) => {
-                println!("   INVALIDATED — {}\n", scope);
+                println!("   INVALIDATED, {}\n", scope);
             }
         }
     }
 
     // ── 7. POST from unknown principal (default deny) ────────────
 
-    println!("7. POST /api/v1/refunds — unknown principal, no roles");
+    println!("7. POST /api/v1/refunds, unknown principal, no roles");
     let req = make_request(
         "POST",
         "/api/v1/refunds",
@@ -276,13 +276,13 @@ async fn main() {
     if http_gate.should_gate(&req) {
         match http_gate.evaluate(&req, &session).await {
             Verdict::Permit(_) => {
-                println!("   PERMITTED — unexpected!\n");
+                println!("   PERMITTED, unexpected!\n");
             }
             Verdict::Refuse(reason) => {
-                println!("   REFUSED — {}\n", reason);
+                println!("   REFUSED, {}\n", reason);
             }
             Verdict::Invalidate(scope) => {
-                println!("   INVALIDATED — {}\n", scope);
+                println!("   INVALIDATED, {}\n", scope);
             }
         }
     }
@@ -308,7 +308,7 @@ async fn main() {
     println!("\nRecent entries:");
     for entry in entries.iter().rev().take(5) {
         println!(
-            "  [{}] {} → {} by {} — {}",
+            "  [{}] {} → {} by {}, {}",
             entry.verdict.to_uppercase(),
             entry.principal_id,
             entry.action_name,
@@ -335,7 +335,7 @@ async fn main() {
     println!("8. Anonymous user, ₹9,99,999 refund (observe-only mode)");
     if observe_gate.should_gate(&req) {
         // HttpGate::evaluate now honors GateConfig::observe_only and
-        // dispatches to Gate::evaluate_observe_only — always permits
+        // dispatches to Gate::evaluate_observe_only, always permits
         // while still logging what would have been blocked.
         match observe_gate.evaluate(&req, &session).await {
             Verdict::Permit(_) => {
@@ -344,10 +344,10 @@ async fn main() {
                 println!("   (Check audit logs to see what would be blocked)\n");
             }
             Verdict::Refuse(reason) => {
-                println!("   REFUSED — {reason} (unexpected: observe-only should permit)\n");
+                println!("   REFUSED, {reason} (unexpected: observe-only should permit)\n");
             }
             Verdict::Invalidate(scope) => {
-                println!("   INVALIDATED — {scope} (unexpected: observe-only should permit)\n");
+                println!("   INVALIDATED, {scope} (unexpected: observe-only should permit)\n");
             }
         }
     }
