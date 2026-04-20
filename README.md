@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/kavach/"><img src="https://img.shields.io/pypi/v/kavach?style=flat-square&label=pypi&color=informational" alt="PyPI"></a>
+  <a href="https://pypi.org/project/kavach-sdk/"><img src="https://img.shields.io/pypi/v/kavach-sdk?style=flat-square&label=pypi&color=informational" alt="PyPI"></a>
   <a href="./docs/README.md"><img src="https://img.shields.io/badge/docs-read-informational?style=flat-square" alt="Docs"></a>
   <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-PQ%20ready-brightgreen?style=flat-square" alt="Security: PQ"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+">
@@ -146,7 +146,7 @@ Policies can be loaded three ways: from a TOML string (operator-edited config), 
 ## Get started
 
 ```bash
-pip install kavach
+pip install kavach-sdk
 ```
 
 See the [Python guide](./docs/guides/python.md) or the [five-minute quickstart](./docs/quickstart.md). Full documentation under [docs/](./docs/README.md).

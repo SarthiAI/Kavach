@@ -7,7 +7,7 @@ If you prefer Rust or TypeScript, start with [guides/rust.md](guides/rust.md) or
 ## 1. Install
 
 ```bash
-pip install kavach
+pip install kavach-sdk
 ```
 
 Wheels ship as `abi3`, one wheel per platform covers CPython 3.10 and newer. Linux x86_64/aarch64, macOS x86_64/arm64, and Windows x64 are supported.

@@ -9,7 +9,7 @@ For the Rust surface underneath, see [rust.md](rust.md). For the TypeScript equi
 ## Install
 
 ```bash
-pip install kavach
+pip install kavach-sdk
 ```
 
 Wheels are abi3, so a single wheel per platform covers CPython 3.10, 3.11, 3.12, and every future Python. Linux x86_64/aarch64, macOS x86_64/arm64, and Windows x64 are supported.

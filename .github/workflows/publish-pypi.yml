@@ -81,7 +81,7 @@ jobs:
     needs: [build-wheels]
     environment:
       name: release
-      url: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'test-pypi') && 'https://test.pypi.org/project/kavach/' || 'https://pypi.org/project/kavach/' }}
+      url: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'test-pypi') && 'https://test.pypi.org/project/kavach-sdk/' || 'https://pypi.org/project/kavach-sdk/' }}
     permissions:
       id-token: write
     steps:

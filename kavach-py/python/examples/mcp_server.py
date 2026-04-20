@@ -5,7 +5,7 @@ Shows how to protect an MCP server's tool handlers with Kavach.
 Every tool call is evaluated by the Rust engine before execution.
 
 Install:
-    pip install kavach mcp
+    pip install kavach-sdk mcp
 
 Run:
     python example_mcp_server.py
