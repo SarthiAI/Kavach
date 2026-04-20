@@ -8,7 +8,7 @@ Until that coverage lands, the public project does not support this crate as par
 
 - [`kavach-core`](https://crates.io/crates/kavach-core): the gate, evaluators, policy engine.
 - [`kavach-pq`](https://crates.io/crates/kavach-pq): post-quantum signatures, audit chains, secure channel.
-- [`kavach`](https://pypi.org/project/kavach/): the Python SDK.
+- [`kavach-sdk`](https://pypi.org/project/kavach-sdk/): the Python SDK.
 - [`kavach`](https://www.npmjs.com/package/kavach): the Node SDK.
 - [`kavach-redis`](https://crates.io/crates/kavach-redis): Redis-backed distributed stores.
 
