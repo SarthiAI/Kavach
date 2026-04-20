@@ -6,11 +6,10 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/kavach/"><img src="https://img.shields.io/pypi/v/kavach?style=flat-square&label=pypi&color=informational" alt="PyPI"></a>
   <a href="./docs/README.md"><img src="https://img.shields.io/badge/docs-read-informational?style=flat-square" alt="Docs"></a>
   <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-PQ%20ready-brightgreen?style=flat-square" alt="Security: PQ"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/node-20%2B-green?style=flat-square" alt="Node 20+">
-  <img src="https://img.shields.io/badge/rust-1.75%2B-orange?style=flat-square" alt="Rust 1.75+">
 </p>
 
 ---
@@ -72,9 +71,7 @@ You get both, together. Every gate decision lands in the audit chain. Every perm
 
 ## See it in action
 
-An AI support agent trying to issue refunds. Same business scenario in both SDKs; the gate does the deciding.
-
-### Python
+An AI support agent trying to issue refunds. The gate does the deciding.
 
 ```python
 from kavach import ActionContext, Gate
@@ -133,70 +130,9 @@ assert v.is_refuse
 print(v.evaluator)  # "invariants", because policies cannot override this
 ```
 
-### TypeScript / Node
+The SDK delegates every `evaluate` to the compiled Rust engine, so policy semantics, drift detection, invariants, and PQ signing run identically to the core.
 
-```typescript
-import { Gate, type EvaluateOptions } from 'kavach';
-
-// Policy as a plain JS object. No separate config format to learn.
-const POLICY = {
-  policies: [
-    {
-      name: 'agent_small_refunds',
-      effect: 'permit',
-      conditions: [
-        { identity_kind: 'agent' },
-        { action: 'issue_refund' },
-        { param_max: { field: 'amount', max: 5000 } },
-        { rate_limit: { max: 50, window: '24h' } },
-      ],
-    },
-  ],
-};
-
-const gate = Gate.fromObject(POLICY, {
-  invariants: [{ name: 'compliance_cap', field: 'amount', maxValue: 50_000 }], // immutable, even by policy
-});
-
-const ctx = (amount: number): EvaluateOptions => ({
-  principalId: 'bot-1',
-  principalKind: 'agent',
-  actionName: 'issue_refund',
-  params: { amount },
-});
-
-// Within the policy's 5_000 cap: permit.
-let v = gate.evaluate(ctx(500));
-console.assert(v.isPermit);
-
-// Over the 5_000 cap, so no policy matches: default-deny refuse.
-v = gate.evaluate(ctx(10_000));
-console.assert(v.isRefuse);
-console.log(v.code);       // "NO_POLICY_MATCH"
-
-// A rogue admin ships a more permissive policy. The invariant still refuses.
-const ROGUE = {
-  policies: [{
-    name: 'agent_small_refunds',
-    effect: 'permit',
-    conditions: [
-      { identity_kind: 'agent' },
-      { action: 'issue_refund' },
-      { param_max: { field: 'amount', max: 100_000 } },  // the rogue change
-    ],
-  }],
-};
-const rogueGate = Gate.fromObject(ROGUE, {
-  invariants: [{ name: 'compliance_cap', field: 'amount', maxValue: 50_000 }],
-});
-v = rogueGate.evaluate(ctx(60_000));
-console.assert(v.isRefuse);
-console.log(v.evaluator);  // "invariants", because policies cannot override this
-```
-
-Both SDKs delegate every `evaluate` to the same compiled Rust engine, so policy semantics, drift detection, invariants, and PQ signing behave identically across them. The Rust API is also available directly via `kavach-core` for services that want to embed the gate in-process; see the [Rust guide](./docs/guides/rust.md).
-
-Policies can be loaded in three ways: from a TOML string (operator-edited config), from a native Python dict / JS object (programmatic construction), or from a JSON file (tooling that already speaks JSON). All three accept the same vocabulary; typo'd field names raise a clear error in every loader instead of being silently dropped. See [docs/reference/policy-language.md](./docs/reference/policy-language.md#three-formats-one-schema).
+Policies can be loaded three ways: from a TOML string (operator-edited config), from a native Python dict (programmatic construction), or from a JSON file (tooling that already speaks JSON). All three accept the same vocabulary; typo'd field names raise a clear error in every loader instead of being silently dropped. See [docs/reference/policy-language.md](./docs/reference/policy-language.md#three-formats-one-schema).
 
 ## What you can build with it
 
@@ -209,15 +145,13 @@ Policies can be loaded in three ways: from a TOML string (operator-edited config
 
 ## Get started
 
-| Language / Runtime | Install | Guide |
-|--------------------|---------|-------|
-| **Python** | `pip install kavach` (one abi3 wheel per platform, covers 3.10+) | [docs/guides/python.md](./docs/guides/python.md) |
-| **TypeScript / Node** | `npm install kavach` (Node 20+) | [docs/guides/typescript.md](./docs/guides/typescript.md) |
-| **Rust (embed in-process)** | `kavach-core = "0.1"` in your `Cargo.toml` | [docs/guides/rust.md](./docs/guides/rust.md) |
-| **Multi-node (Redis)** *(experimental)* | `RedisRateLimitStore` / `RedisSessionStore` / `RedisInvalidationBroadcaster` from the Python SDK; Rust via `kavach-redis`. Rust-level integration tests pass; end-to-end validation pending. | [docs/guides/distributed.md](./docs/guides/distributed.md) |
-| **Operator-edited TOML** | the hand-edited policy file workflow for ops-owned configs | [docs/guides/toml-policies.md](./docs/guides/toml-policies.md) |
+```bash
+pip install kavach
+```
 
-Or start with the [five-minute quickstart](./docs/quickstart.md). The full documentation lives under [docs/](./docs/README.md). Upcoming integrations (native HTTP middleware, MCP tool gating) are tracked in [docs/roadmap.md](./docs/roadmap.md).
+See the [Python guide](./docs/guides/python.md) or the [five-minute quickstart](./docs/quickstart.md). Full documentation under [docs/](./docs/README.md).
+
+**Only the Python SDK is released as of now.** The Node SDK, Rust crates, Redis-backed multi-node stack, HTTP middleware, and MCP tool gating are all built and under internal testing; they will be released as each passes validation. Progress is tracked in [docs/roadmap.md](./docs/roadmap.md).
 
 ## How it works, a layer deeper
 
@@ -246,7 +180,7 @@ For multi-node deployments, pluggable `RateLimitStore`, `SessionStore`, and `Inv
 └── e2e-tests/        End-to-end harnesses. 21 realistic scenarios, including a wire-trace runner.
 ```
 
-Two additional crates (`kavach-http`, `kavach-mcp`) live in the workspace and are published on crates.io, but are held as experimental until the validation harness covers them. See [docs/roadmap.md](./docs/roadmap.md) for the sequencing.
+Two additional crates (`kavach-http`, `kavach-mcp`) live in the workspace. They are held as experimental, under internal testing, and will be published once the validation harness covers them. See [docs/roadmap.md](./docs/roadmap.md) for the sequencing.
 
 ## Project status
 
@@ -272,12 +206,6 @@ Full docs live in [docs/](./docs/README.md). Starting points:
 
 Report vulnerabilities privately to **`support@sarthiai.com`** with subject `[kavach-security] <short description>`. Do not open a public issue. See [SECURITY.md](./SECURITY.md) for the full policy, threat model, and in-scope / out-of-scope details.
 
-## Contributing
-
-Bug reports, feature requests, and pull requests are welcome. Open an issue on GitHub.
-
-Security issues go to `support@sarthiai.com`, not the public tracker.
-
 ## License
 
 [Elastic License 2.0](./LICENSE). Source-available. You are free to use, embed, modify, and redistribute Kavach for any purpose, including commercial use inside your products. You may **not** offer Kavach itself as a hosted or managed service that substitutes for the features of this software, and you may not remove or obscure the license notices.
@@ -287,5 +215,7 @@ In plain language: build on top of Kavach, ship it inside your products, modify 
 ---
 
 <p align="center"><em>Built with Rust. Runs post-quantum. Says no by default.</em></p>
+
+<p align="center">If Kavach is useful to you, <a href="https://github.com/SarthiAI/Kavach">star the repo</a>. It helps others find the project.</p>
 
 <p align="center">The Kavach project is envisioned, developed and maintained by <a href="https://www.linkedin.com/in/chirotpal/">Chirotpal</a>.</p>

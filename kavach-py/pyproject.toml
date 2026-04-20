@@ -10,13 +10,48 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Elastic-2.0" }
 license-files = ["LICENSE"]
+keywords = [
+    "security",
+    "policy",
+    "post-quantum",
+    "ml-dsa",
+    "ml-kem",
+    "ai-agents",
+    "authorization",
+    "rate-limiting",
+    "drift-detection",
+]
+authors = [
+    { name = "SarthiAI", email = "support@sarthiai.com" },
+]
+maintainers = [
+    { name = "SarthiAI", email = "support@sarthiai.com" },
+]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "License :: Other/Proprietary License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Security",
     "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+
+[project.urls]
+Homepage = "https://github.com/SarthiAI/Kavach"
+Repository = "https://github.com/SarthiAI/Kavach"
+Documentation = "https://github.com/SarthiAI/Kavach/tree/main/docs"
+Issues = "https://github.com/SarthiAI/Kavach/issues"
 
 [tool.maturin]
 # The compiled cdylib is placed inside the `kavach` Python package so that
