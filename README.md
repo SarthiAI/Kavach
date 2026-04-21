@@ -134,6 +134,8 @@ The SDK delegates every `evaluate` to the compiled Rust engine, so policy semant
 
 Policies can be loaded three ways: from a TOML string (operator-edited config), from a native Python dict (programmatic construction), or from a JSON file (tooling that already speaks JSON). All three accept the same vocabulary; typo'd field names raise a clear error in every loader instead of being silently dropped. See [docs/reference/policy-language.md](./docs/reference/policy-language.md#three-formats-one-schema).
 
+For 21 worked-through business scenarios (loan underwriting, healthcare PHI, AI agent attestation, signed permits across services, and the rest), see [business-tests-python/](./business-tests-python/). Each script is self-contained and runs against the published `kavach-sdk` wheel.
+
 ## What you can build with it
 
 - **AI agent tool gating.** Give an LLM tool access; Kavach guards every action before it runs. A prompt-injected agent cannot escalate beyond what policy permits.
@@ -170,14 +172,15 @@ For multi-node deployments, pluggable `RateLimitStore`, `SessionStore`, and `Inv
 
 ```
 .
-├── kavach-core/      Gate, verdicts, evaluators, traits. The brain.
-├── kavach-pq/        Post-quantum crypto. Signatures, encryption, audit chain, secure channel.
-├── kavach-py/        Python SDK via PyO3. Ships as abi3 wheels.
-├── kavach-node/      Node / TypeScript SDK via napi-rs.
-├── kavach-redis/     Redis-backed distributed stores and invalidation broadcaster. (experimental)
-├── docs/             Full documentation, organized by concept, guide, operations, reference.
-├── examples/         Reference policy files.
-└── e2e-tests/        End-to-end harnesses. 21 realistic scenarios, including a wire-trace runner.
+├── kavach-core/             Gate, verdicts, evaluators, traits. The brain.
+├── kavach-pq/               Post-quantum crypto. Signatures, encryption, audit chain, secure channel.
+├── kavach-py/               Python SDK via PyO3. Ships as abi3 wheels.
+├── kavach-node/             Node / TypeScript SDK via napi-rs.
+├── kavach-redis/            Redis-backed distributed stores and invalidation broadcaster. (experimental)
+├── docs/                    Full documentation, organized by concept, guide, operations, reference.
+├── examples/                Reference policy files.
+├── business-tests-python/   21 self-contained SDK scenarios. Real business stories, runnable end to end.
+└── e2e-tests/               Internal end-to-end harness, lower-level wire traces.
 ```
 
 Two additional crates (`kavach-http`, `kavach-mcp`) live in the workspace. They are held as experimental, under internal testing, and will be published once the validation harness covers them. See [docs/roadmap.md](./docs/roadmap.md) for the sequencing.
