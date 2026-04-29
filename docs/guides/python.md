@@ -262,6 +262,45 @@ A verifier-only signer (no signing key material) is also supported via `PqTokenS
 
 ---
 
+## Persisting signer identity across restarts
+
+In v0.1.0, `KavachKeyPair` does not expose secret-byte serialization. A keypair you generate inside the Python SDK lives in process memory only; on restart, a fresh keypair has a fresh `key_id` and the public bundle changes. There are two ways to live with this:
+
+### Pattern B (recommended for v0.1.0): regenerate at boot, redistribute the public bundle
+
+Generate a fresh keypair on every gate-process boot, attach it to the gate, and push the public bundle to your verifier pool through whatever distribution path you operate (a config service, a Kubernetes ConfigMap, a `PublicKeyDirectory` file, etc.).
+
+```python
+kp     = KavachKeyPair.generate()
+signer = PqTokenSigner.from_keypair_hybrid(kp)
+gate   = Gate.from_dict(POLICY, token_signer=signer)
+
+distribute_to_verifiers(kp.public_keys())   # your code
+```
+
+Verifiers should accept multiple bundles in their `PublicKeyDirectory` and resolve by the `key_id` stamped on each envelope. Old bundles can be retired once permits issued under them have expired (default permit TTL is 30 seconds).
+
+This is the only pattern fully reachable through the published Python SDK on its own. It is acceptable for single-tenant deployments and any setup where verifiers refresh within seconds of a gate-process restart.
+
+### Pattern A: provision raw key bytes from your KMS / HSM
+
+The lowest-level `PqTokenSigner.hybrid(...)` constructor accepts raw bytes:
+
+```python
+signer = PqTokenSigner.hybrid(
+    ml_dsa_sk, ml_dsa_vk,
+    ed_sk, ed_vk,
+    key_id="kavach-prod-2026",
+)
+gate = Gate.from_dict(POLICY, token_signer=signer)
+```
+
+This gives stable identity across restarts, but presumes you have a non-Kavach path that emits ML-DSA-65 key material interoperable with `kavach-pq` (an HSM with native ML-DSA-65 support, for example). Do not install third-party Python PQ-crypto libraries (`pqcrypto`, `ml-dsa`, `pyca/cryptography`, etc.) to mint these bytes for use with Kavach; interoperability has not been validated and is not guaranteed.
+
+Adding `KavachKeyPair` byte serialization so Pattern A reaches stable identity through the SDK alone is tracked on the [roadmap](../roadmap.md).
+
+---
+
 ## Public key directory
 
 Three factory styles, one unified class. The three variants have identical `fetch(key_id)` semantics; only management differs.

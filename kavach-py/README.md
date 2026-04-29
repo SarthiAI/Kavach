@@ -127,6 +127,15 @@ if verdict.is_permit:
 
 Hybrid (`generate_hybrid`) signs with both ML-DSA-65 and Ed25519; a hybrid verifier rejects PQ-only envelopes as a signature-downgrade guard.
 
+#### Persisting signer identity across restarts
+
+`KavachKeyPair` does not expose secret-byte serialization in v0.1.0, so a keypair generated through the Python SDK cannot be persisted and rehydrated through the SDK alone. Two practical patterns:
+
+- **Regenerate at boot, redistribute the public bundle** (default for v0.1.0). Generate a fresh `KavachKeyPair`, attach it via `PqTokenSigner.from_keypair_hybrid(kp)`, and push `kp.public_keys()` to your verifier pool on every gate-process boot. Verifiers should accept multiple bundles in their `PublicKeyDirectory` and resolve by the `key_id` stamped on each envelope. Old bundles can be retired once permits issued under them have expired (default permit TTL is 30 seconds).
+- **Provision raw key bytes from your KMS / HSM**. The low-level `PqTokenSigner.hybrid(ml_dsa_sk, ml_dsa_vk, ed_sk, ed_vk, key_id=...)` constructor accepts raw bytes; this gives stable identity across restarts but presumes a non-Kavach generator that emits ML-DSA-65 keys interoperable with `kavach-pq`. Do not install third-party Python PQ-crypto libraries (`pqcrypto`, `ml-dsa`, `pyca/cryptography`, etc.) to mint these bytes; interoperability is not guaranteed. The expected path is an HSM with native ML-DSA-65 support.
+
+Adding `KavachKeyPair` byte serialization so the first pattern reaches stable identity through the SDK alone is on the [roadmap](https://github.com/SarthiAI/Kavach/blob/main/docs/roadmap.md).
+
 ### Key pairs
 
 ```python

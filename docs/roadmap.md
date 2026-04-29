@@ -103,6 +103,32 @@ vendoring them in. The public project does not support that usage yet.
   does not yet cover this path end to end. Treated as experimental in the
   docs (see [concepts/key-management.md](concepts/key-management.md)).
 
+## Planned: `KavachKeyPair` byte serialization in the Python SDK
+
+The Python `KavachKeyPair` exposes no secret-byte serialization in v0.1.0.
+A keypair you generate via `KavachKeyPair.generate()` cannot be dumped to
+bytes for KMS or HSM persistence and later rehydrated through the SDK.
+Stable signer identity across process restarts therefore requires either
+regenerating per restart and redistributing the public bundle (the
+recommended pattern for v0.1.0) or sourcing raw ML-DSA-65 key bytes from a
+non-Kavach generator (for example, an HSM with native ML-DSA-65 support)
+and feeding them to `PqTokenSigner.hybrid(...)`. The Rust side already
+supports byte access directly on `KavachKeyPair`; this is a binding gap,
+not a fundamental one.
+
+When this comes out of planned, `KavachKeyPair` will expose
+`export_secret_bytes()` and `KavachKeyPair.from_bytes(...)` (or equivalent
+named methods) so the typical pattern becomes:
+
+1. Generate once: `kp = KavachKeyPair.generate()`.
+2. Persist: `my_kms.put(kp.id, kp.export_secret_bytes())`.
+3. Rehydrate on every restart: `kp = KavachKeyPair.from_bytes(my_kms.get(kp.id))`.
+4. Build the signer: `signer = PqTokenSigner.from_keypair_hybrid(kp)`.
+
+This makes the KMS-backed pattern reachable end to end through the Python
+SDK alone, without an external ML-DSA-65 generator. The same surface will
+be added to the Node SDK for consistency.
+
 ## Planned: Rust-level consumer catalogue
 
 - A Rust analogue of `business-tests/` so the direct-Rust integration
