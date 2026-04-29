@@ -155,6 +155,16 @@ See the [Python guide](./docs/guides/python.md) or the [five-minute quickstart](
 
 **Only the Python SDK is released as of now.** The Node SDK, Rust crates, Redis-backed multi-node stack, HTTP middleware, and MCP tool gating are all built and under internal testing; they will be released as each passes validation. Progress is tracked in [docs/roadmap.md](./docs/roadmap.md).
 
+## Use with AI coding agents
+
+Most modern coding agents (Claude Code, Cursor, Codex, Gemini CLI, and any other client that reads `SKILL.md`) can read an [Agent Skill](https://agentskills.io/) to learn how to integrate a library correctly. Kavach ships an official skill at [SarthiAI/kavach-skill](https://github.com/SarthiAI/kavach-skill). Install it with:
+
+```bash
+npx skills add SarthiAI/kavach-skill
+```
+
+After install, ask your agent to "add Kavach to this Python service" and it produces correct integration code: policies authored in dict, JSON, or TOML form, the four built-in drift detectors wired in, post-quantum signed permit tokens with restart-safe key persistence, a tamper-evident `SignedAuditChain`, `SecureChannel` between services, and observe-mode rollout.
+
 ## How it works, a layer deeper
 
 Every evaluation builds an `ActionContext` (principal, action, session state, environment) and hands it to the Gate. The Gate iterates a `Vec<Arc<dyn Evaluator>>` in order:
