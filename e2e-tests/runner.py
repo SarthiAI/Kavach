@@ -156,7 +156,7 @@ def record(ctx: RunCtx, num: int, name: str, exercises: str, passed: bool, detai
     log.info("")  # blank line for readability between scenarios
 
 
-# ─── Scenarios 1–7: the gate ─────────────────────────────────────────
+# ─── Scenarios 1-7: the gate ─────────────────────────────────────────
 
 
 async def s01_small_refund_permits(client: httpx.AsyncClient, ctx: RunCtx) -> None:
@@ -318,7 +318,7 @@ conditions = [
     )
 
 
-# ─── Scenarios 8–15: the crypto envelope ─────────────────────────────
+# ─── Scenarios 8-15: the crypto envelope ─────────────────────────────
 
 
 async def obtain_valid_permit(client: httpx.AsyncClient) -> dict:

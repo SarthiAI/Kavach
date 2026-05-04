@@ -13,7 +13,7 @@ Please include:
 - The Kavach version, crate, and language SDK (Rust / Python / Node) affected.
 - Any suggested remediation you've considered.
 
-We will acknowledge your report within **72 hours** and aim to provide an initial assessment within **7 days**. We follow a **90-day coordinated disclosure** window by default, shortened if a fix ships sooner and extended only with your agreement for unusually complex issues.
+We will acknowledge your report within **72 hours** and aim to provide an initial assessment within **14 days**. We follow a **90-day coordinated disclosure** window by default, shortened if a fix ships sooner and extended only with your agreement for unusually complex issues.
 
 Researchers who report in good faith will be credited in the release notes (or anonymously, at your preference).
 
