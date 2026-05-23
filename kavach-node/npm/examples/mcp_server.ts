@@ -11,7 +11,7 @@
  *   npx tsx example_mcp_server.ts
  */
 
-import { Gate, KavachRefused, KavachInvalidated } from 'kavach';
+import { Gate, KavachRefused, KavachInvalidated } from 'kavach-sdk';
 import { McpKavachMiddleware } from 'kavach/mcp';
 
 // ── 1. Set up the gate ───────────────────────────────────────────

@@ -9,13 +9,13 @@ For the Rust surface underneath, see [rust.md](rust.md). For the Python equivale
 ## Install
 
 ```bash
-npm install kavach
+npm install kavach-sdk
 ```
 
 Native addons ship for Linux x64/arm64 and macOS x64/arm64. Node 20+ is supported.
 
 ```typescript
-import { Gate } from 'kavach';
+import { Gate } from 'kavach-sdk';
 ```
 
 ---
@@ -23,7 +23,7 @@ import { Gate } from 'kavach';
 ## First call
 
 ```typescript
-import { Gate } from 'kavach';
+import { Gate } from 'kavach-sdk';
 
 // Policy as a plain JS object. No separate config format to learn.
 const POLICY = {
@@ -67,7 +67,7 @@ An empty policy set is valid. It default-denies, which is the kill-switch shape.
 Five factories, all accepting the same `GateOptions`. Pick whichever fits how you store or generate policies; they all produce identical behavior.
 
 ```typescript
-import { Gate, GateOptions } from 'kavach';
+import { Gate, GateOptions } from 'kavach-sdk';
 
 Gate.fromObject(policies: object,    options?: GateOptions): Gate  // native JS object (recommended)
 Gate.fromJsonString(json: string,    options?: GateOptions): Gate  // JSON string (wire body)
@@ -169,7 +169,7 @@ gate.check(opts);         // throws KavachRefused / KavachInvalidated on block
 Error classes carry structured fields:
 
 ```typescript
-import { KavachRefused, KavachInvalidated } from 'kavach';
+import { KavachRefused, KavachInvalidated } from 'kavach-sdk';
 
 try {
   gate.check(opts);
@@ -189,7 +189,7 @@ try {
 ## Signed permit tokens: `PqTokenSigner`
 
 ```typescript
-import { Gate, PqTokenSigner } from 'kavach';
+import { Gate, PqTokenSigner } from 'kavach-sdk';
 
 const signer = PqTokenSigner.generateHybrid();    // ML-DSA-65 + Ed25519
 // const signer = PqTokenSigner.generatePqOnly(); // ML-DSA-65 only
@@ -226,7 +226,7 @@ signer.isHybrid;     // boolean
 ## Key pairs: `KavachKeyPair.generate()`
 
 ```typescript
-import { KavachKeyPair } from 'kavach';
+import { KavachKeyPair } from 'kavach-sdk';
 
 const kp = KavachKeyPair.generate();                  // no expiry
 const short = KavachKeyPair.generateWithExpiry(3600); // seconds
@@ -258,7 +258,7 @@ PqTokenSigner.pqOnly(Buffer.alloc(0), bundle.mlDsaVerifyingKey, kp.id);
 ## Signed audit chain
 
 ```typescript
-import { AuditEntry, KavachKeyPair, SignedAuditChain } from 'kavach';
+import { AuditEntry, KavachKeyPair, SignedAuditChain } from 'kavach-sdk';
 
 const kp = KavachKeyPair.generate();
 const chain = new SignedAuditChain(kp, true);   // hybrid
@@ -283,7 +283,7 @@ Tampered blobs, wrong-key bundles, and mode mismatches (PQ-only verifier present
 ```typescript
 import {
   DirectoryTokenVerifier, KavachKeyPair, PublicKeyDirectory,
-} from 'kavach';
+} from 'kavach-sdk';
 import { writeFileSync } from 'fs';
 
 // In-memory, supports insert / remove.
@@ -319,7 +319,7 @@ Insert / remove on file-backed directories throw. Missing keys fail closed, not 
 ## Secure channel (bytes flow)
 
 ```typescript
-import { KavachKeyPair, SecureChannel } from 'kavach';
+import { KavachKeyPair, SecureChannel } from 'kavach-sdk';
 
 const alice = KavachKeyPair.generate();
 const bob = KavachKeyPair.generate();
@@ -353,7 +353,7 @@ The Node SDK ships an in-process `InMemoryInvalidationBroadcaster` plus a listen
 ```typescript
 import {
   Gate, InMemoryInvalidationBroadcaster, spawnInvalidationListener,
-} from 'kavach';
+} from 'kavach-sdk';
 
 const broadcaster = new InMemoryInvalidationBroadcaster();
 const gate = Gate.fromObject(POLICY, { broadcaster });
@@ -403,7 +403,7 @@ import {
   SecureChannel,
   SignedAuditChain,
   type PermitTokenInput,
-} from 'kavach';
+} from 'kavach-sdk';
 
 const POLICY = {
   policies: [

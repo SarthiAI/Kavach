@@ -1,0 +1,19 @@
+{
+  "name": "kavach-business-tests-node",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Twenty-one self-contained scenarios validating the Kavach Node SDK end to end. One-to-one port of business-tests-python.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "run:all": "tsc -p tsconfig.json && node dist/run_all.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "kavach-sdk": "file:../kavach-node/npm"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

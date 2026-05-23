@@ -1,4 +1,4 @@
-# kavach
+# kavach-sdk
 
 **Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems. TypeScript SDK.**
 
@@ -13,7 +13,7 @@ Action attempted ──▶ Gate (identity · policy · drift · invariants) ─�
 ## Install
 
 ```bash
-npm install kavach
+npm install kavach-sdk
 ```
 
 Native addons are published for Linux x64/arm64 and macOS x64/arm64. Node 20+.
@@ -23,7 +23,7 @@ Native addons are published for Linux x64/arm64 and macOS x64/arm64. Node 20+.
 ## 60-second quickstart
 
 ```typescript
-import { Gate, type EvaluateOptions } from 'kavach';
+import { Gate, type EvaluateOptions } from 'kavach-sdk';
 
 // Policy as a plain JS object. No separate config format to learn.
 const POLICY = {
@@ -88,7 +88,7 @@ Typo'd field names (`{ idnetity_kind: 'agent' }`) throw a clear error in every l
 When a `PqTokenSigner` is attached to a gate, every Permit verdict carries an ML-DSA-65 (or ML-DSA-65 + Ed25519 hybrid) signed envelope. Downstream services verify independently.
 
 ```typescript
-import { Gate, PqTokenSigner } from 'kavach';
+import { Gate, PqTokenSigner } from 'kavach-sdk';
 
 const signer = PqTokenSigner.generateHybrid();
 const gate = Gate.fromObject(POLICY, { tokenSigner: signer });
@@ -114,7 +114,7 @@ Hybrid signers sign with both ML-DSA-65 and Ed25519; a hybrid verifier rejects P
 ### Key pairs
 
 ```typescript
-import { KavachKeyPair } from 'kavach';
+import { KavachKeyPair } from 'kavach-sdk';
 
 const kp = KavachKeyPair.generate();                      // no expiry
 const kp2 = KavachKeyPair.generateWithExpiry(3600);       // 1-hour lifetime
@@ -128,7 +128,7 @@ const bundle = kp.publicKeys();   // PublicKeyBundleView, safe to share
 Append-only, tamper-evident audit log. `verify` rejects tampered entries, wrong keys, and mode mismatches (e.g., a PQ-only verifier on a hybrid chain, which is a silent downgrade).
 
 ```typescript
-import { AuditEntry, SignedAuditChain } from 'kavach';
+import { AuditEntry, SignedAuditChain } from 'kavach-sdk';
 
 const chain = new SignedAuditChain(kp, true);  // hybrid
 chain.append(new AuditEntry({
@@ -149,7 +149,7 @@ SignedAuditChain.verifyJsonl(blob, kp.publicKeys());
 Hybrid-encrypted, PQ-signed byte channel between two peers. Sealed payloads are opaque; ship them over any transport.
 
 ```typescript
-import { SecureChannel, KavachKeyPair } from 'kavach';
+import { SecureChannel, KavachKeyPair } from 'kavach-sdk';
 
 const alice = KavachKeyPair.generate();
 const bob = KavachKeyPair.generate();
@@ -166,7 +166,7 @@ Replay, cross-context, and wrong-recipient attacks all fail closed.
 ### Public key directory
 
 ```typescript
-import { PublicKeyDirectory, DirectoryTokenVerifier, KavachKeyPair } from 'kavach';
+import { PublicKeyDirectory, DirectoryTokenVerifier, KavachKeyPair } from 'kavach-sdk';
 import { writeFileSync } from 'fs';
 
 const signingKey = KavachKeyPair.generate();
@@ -219,7 +219,7 @@ Fan out `Invalidate` verdicts to anything on this node that needs to react (metr
 ```typescript
 import {
   Gate, InMemoryInvalidationBroadcaster, spawnInvalidationListener,
-} from 'kavach';
+} from 'kavach-sdk';
 
 const broadcaster = new InMemoryInvalidationBroadcaster();
 const gate = Gate.fromObject(POLICY, { broadcaster });

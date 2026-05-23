@@ -5,6 +5,19 @@
   "main": "index.js",
   "types": "index.d.ts",
   "license": "SEE LICENSE IN ../LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SarthiAI/Kavach.git",
+    "directory": "kavach-node"
+  },
+  "homepage": "https://github.com/SarthiAI/Kavach",
+  "bugs": {
+    "url": "https://github.com/SarthiAI/Kavach/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "files": [
     "index.js",
     "index.d.ts",

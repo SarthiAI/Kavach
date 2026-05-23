@@ -6,7 +6,7 @@
  *
  * @example
  * ```typescript
- * import { Gate } from 'kavach';
+ * import { Gate } from 'kavach-sdk';
  *
  * const gate = Gate.fromFile('kavach.toml');
  * const verdict = gate.evaluate({
@@ -37,6 +37,7 @@ import {
   spawnInvalidationListener as spawnInvalidationListenerRaw,
   type ActionContextInput,
   type AuditEntryOptions,
+  type DeviceFingerprintInput,
   type GeoLocationInput,
   type InvalidationScopeView,
   type PermitTokenInput,
@@ -56,7 +57,14 @@ export interface EvaluateOptions {
   actionName: string;
   roles?: string[];
   resource?: string;
-  params?: Record<string, number>;
+  /**
+   * Action params. Numeric values drive `param_max` / `param_min`;
+   * string values drive `param_in` over string-valued fields like
+   * `provider`, `country_code`, `region`. Mirrors the Python SDK's
+   * unified mixed-type `params` dict, the wrapper splits numbers and
+   * strings before forwarding to the engine.
+   */
+  params?: Record<string, number | string>;
   ip?: string;
   sessionId?: string;
   /**
@@ -72,6 +80,34 @@ export interface EvaluateOptions {
    * tolerant-mode `GeoLocationDrift`.
    */
   originGeo?: GeoLocationInput;
+  /**
+   * Explicit session-origin IP. When set, overrides the `ip`-derived
+   * default (`session.origin_ip = env.ip`), lets callers model
+   * "session started from X, request from Y" for strict/tolerant
+   * `GeoLocationDrift`.
+   */
+  originIp?: string;
+  /**
+   * Current device fingerprint (→ `EnvContext.device`). Combined
+   * with `originDevice`, feeds `DeviceDrift`.
+   */
+  device?: DeviceFingerprintInput;
+  /**
+   * Session-origin device fingerprint (→ `SessionState.origin_device`).
+   * `DeviceDrift` fires when both sides are set and the hashes differ.
+   */
+  originDevice?: DeviceFingerprintInput;
+  /**
+   * Unix-epoch seconds; synthesizes `SessionState.started_at`. Lets
+   * scenarios exercise `SessionAgeDrift` without waiting hours.
+   */
+  sessionStartedAt?: number;
+  /**
+   * Synthesized `SessionState.action_count`. Combined with a
+   * synthesized `session_started_at`, feeds `BehaviorDrift`'s
+   * actions-per-minute calculation.
+   */
+  actionCount?: number;
 }
 
 export interface Invariant {
@@ -123,6 +159,7 @@ export {
 };
 export type {
   AuditEntryOptions,
+  DeviceFingerprintInput,
   GeoLocationInput,
   InvalidationScopeView,
   PermitTokenInput,
@@ -162,6 +199,36 @@ export function spawnInvalidationListener(
       console.error('[kavach] invalidation callback threw, continuing:', cbErr);
     }
   });
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────
+
+/**
+ * Split a unified `Record<string, number | string>` params map into the
+ * two engine-side maps. Exported so the MCP / HTTP middleware layers
+ * can call into the same path without duplicating the type check.
+ */
+export function splitParams(
+  params?: Record<string, number | string>,
+): { numericParams?: Record<string, number>; stringParams?: Record<string, string> } {
+  if (!params) return {};
+  const numericParams: Record<string, number> = {};
+  const stringParams: Record<string, string> = {};
+  let hasNumeric = false;
+  let hasString = false;
+  for (const [k, v] of Object.entries(params)) {
+    if (typeof v === 'number') {
+      numericParams[k] = v;
+      hasNumeric = true;
+    } else if (typeof v === 'string') {
+      stringParams[k] = v;
+      hasString = true;
+    }
+  }
+  return {
+    numericParams: hasNumeric ? numericParams : undefined,
+    stringParams: hasString ? stringParams : undefined,
+  };
 }
 
 // ─── Gate ────────────────────────────────────────────────────────
@@ -297,17 +364,24 @@ export class Gate {
   }
 
   evaluate(opts: EvaluateOptions): VerdictResult {
+    const { numericParams, stringParams } = splitParams(opts.params);
     const ctx: ActionContextInput = {
       principalId: opts.principalId,
       principalKind: opts.principalKind,
       actionName: opts.actionName,
       roles: opts.roles ?? [],
       resource: opts.resource ?? undefined,
-      params: opts.params ?? undefined,
+      params: numericParams,
+      stringParams: stringParams,
       ip: opts.ip ?? undefined,
       sessionId: opts.sessionId ?? undefined,
       currentGeo: opts.currentGeo ?? undefined,
       originGeo: opts.originGeo ?? undefined,
+      originIp: opts.originIp ?? undefined,
+      device: opts.device ?? undefined,
+      originDevice: opts.originDevice ?? undefined,
+      sessionStartedAt: opts.sessionStartedAt ?? undefined,
+      actionCount: opts.actionCount ?? undefined,
     };
     return this.engine.evaluate(ctx);
   }

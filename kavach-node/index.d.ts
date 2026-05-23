@@ -42,6 +42,13 @@ export interface ActionContextInput {
   roles?: Array<string>
   resource?: string
   params?: Record<string, number>
+  /**
+   * String-valued action params (drives `param_in` over string-valued
+   * fields like `provider`, `country_code`, `region`). Mirrors the
+   * Python SDK's `with_param(name, value)` for string values. Numeric
+   * params still go through the `params` field above.
+   */
+  stringParams?: Record<string, string>
   ip?: string
   sessionId?: string
   /**

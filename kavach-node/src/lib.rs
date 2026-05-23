@@ -148,6 +148,11 @@ pub struct ActionContextInput {
     pub roles: Option<Vec<String>>,
     pub resource: Option<String>,
     pub params: Option<HashMap<String, f64>>,
+    /// String-valued action params (drives `param_in` over string-valued
+    /// fields like `provider`, `country_code`, `region`). Mirrors the
+    /// Python SDK's `with_param(name, value)` for string values. Numeric
+    /// params still go through the `params` field above.
+    pub string_params: Option<HashMap<String, String>>,
     pub ip: Option<String>,
     pub session_id: Option<String>,
     /// Current geographic location (→ `EnvContext.geo`). Set this plus
@@ -1047,6 +1052,11 @@ impl KavachGate {
         }
         if let Some(params) = ctx.params {
             for (k, v) in params {
+                action.params.insert(k, serde_json::json!(v));
+            }
+        }
+        if let Some(string_params) = ctx.string_params {
+            for (k, v) in string_params {
                 action.params.insert(k, serde_json::json!(v));
             }
         }

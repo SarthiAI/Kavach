@@ -1,17 +1,52 @@
 {
-  "name": "kavach",
+  "name": "kavach-sdk",
   "version": "0.1.0",
-  "description": "Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems",
+  "description": "Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems. TypeScript SDK on a compiled Rust core.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "author": "SarthiAI <support@sarthiai.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SarthiAI/Kavach.git",
+    "directory": "kavach-node/npm"
+  },
+  "homepage": "https://github.com/SarthiAI/Kavach#readme",
+  "bugs": {
+    "url": "https://github.com/SarthiAI/Kavach/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "security",
+    "policy",
+    "policy-engine",
+    "execution-boundary",
+    "default-deny",
+    "ai-agents",
+    "agent-security",
+    "prompt-injection",
+    "mcp",
+    "langchain",
+    "post-quantum",
+    "ml-dsa",
+    "audit-chain"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["security", "ai-agents", "mcp", "post-quantum", "execution-boundary"],
-  "license": "SEE LICENSE IN ../../LICENSE",
   "dependencies": {
-    "kavach-engine": "file:.."
+    "kavach-engine": "0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.0.0",

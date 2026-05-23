@@ -7,7 +7,7 @@
  * @example Express
  * ```typescript
  * import express from 'express';
- * import { Gate, createExpressMiddleware } from 'kavach';
+ * import { Gate, createExpressMiddleware } from 'kavach-sdk';
  *
  * const gate = Gate.fromFile('kavach.toml');
  * const app = express();
@@ -125,10 +125,10 @@ export class HttpKavachMiddleware {
       return typeof v === 'string' ? v : v?.[0] ?? '';
     };
 
-    const numericParams: Record<string, number> = {};
+    const mergedParams: Record<string, number | string> = {};
     if (req.body) {
       for (const [k, v] of Object.entries(req.body)) {
-        if (typeof v === 'number') numericParams[k] = v;
+        if (typeof v === 'number' || typeof v === 'string') mergedParams[k] = v;
       }
     }
 
@@ -150,7 +150,7 @@ export class HttpKavachMiddleware {
       actionName: deriveActionName(req.method, req.path),
       roles: header(this.opts.rolesHeader).split(',').filter(Boolean),
       resource: req.path,
-      params: Object.keys(numericParams).length > 0 ? numericParams : undefined,
+      params: Object.keys(mergedParams).length > 0 ? mergedParams : undefined,
       ip: req.ip,
       currentGeo: req.currentGeo ?? resolved?.currentGeo,
       originGeo: req.originGeo ?? resolved?.originGeo,

@@ -7,7 +7,7 @@
  * @example
  * ```typescript
  * import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
- * import { Gate, McpKavachMiddleware, InMemorySessionStore } from 'kavach';
+ * import { Gate, McpKavachMiddleware, InMemorySessionStore } from 'kavach-sdk';
  *
  * const gate = Gate.fromFile('kavach.toml');
  * const kavach = new McpKavachMiddleware(gate, {
@@ -41,6 +41,7 @@ import {
   type PrincipalKind,
   type EvaluateOptions,
   type GeoLocationInput,
+  type DeviceFingerprintInput,
 } from './index';
 import type { VerdictResult } from 'kavach-engine';
 
@@ -58,6 +59,16 @@ export interface McpCallerInfo {
   currentGeo?: GeoLocationInput;
   /** Geographic location captured at session start. */
   originGeo?: GeoLocationInput;
+  /** Explicit session-origin IP (default: env.ip). */
+  originIp?: string;
+  /** Current device fingerprint, drives `DeviceDrift`. */
+  device?: DeviceFingerprintInput;
+  /** Session-origin device fingerprint, drives `DeviceDrift`. */
+  originDevice?: DeviceFingerprintInput;
+  /** Unix-epoch seconds for `SessionState.started_at`. */
+  sessionStartedAt?: number;
+  /** Synthesized `SessionState.action_count` for `BehaviorDrift`. */
+  actionCount?: number;
 }
 
 /**
@@ -236,10 +247,10 @@ export class McpKavachMiddleware {
     params: Record<string, unknown>,
     caller: McpCallerInfo,
   ): EvaluateOptions {
-    const numericParams: Record<string, number> = {};
+    const merged: Record<string, number | string> = {};
     for (const [k, v] of Object.entries(params)) {
-      if (typeof v === 'number') {
-        numericParams[k] = v;
+      if (typeof v === 'number' || typeof v === 'string') {
+        merged[k] = v;
       }
     }
 
@@ -248,11 +259,16 @@ export class McpKavachMiddleware {
       principalKind: caller.callerKind ?? 'agent',
       actionName: toolName,
       roles: caller.roles,
-      params: Object.keys(numericParams).length > 0 ? numericParams : undefined,
+      params: Object.keys(merged).length > 0 ? merged : undefined,
       ip: caller.ip,
       sessionId: caller.sessionId,
       currentGeo: caller.currentGeo,
       originGeo: caller.originGeo,
+      originIp: caller.originIp,
+      device: caller.device,
+      originDevice: caller.originDevice,
+      sessionStartedAt: caller.sessionStartedAt,
+      actionCount: caller.actionCount,
     };
   }
 
