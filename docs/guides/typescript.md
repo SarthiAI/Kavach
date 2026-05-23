@@ -359,14 +359,14 @@ const broadcaster = new InMemoryInvalidationBroadcaster();
 const gate = Gate.fromObject(POLICY, { broadcaster });
 
 const handle = spawnInvalidationListener(broadcaster, (scope) => {
-  console.log(`invalidated: ${scope.target} (${scope.reason})`);
+  console.log(`invalidated: ${scope.targetKind}=${scope.targetId} (${scope.reason})`);
 });
 
 // On shutdown:
 handle.abort();
 ```
 
-`InvalidationScopeView` exposes `.target` (session / principal / role), `.reason`, and `.evaluator`. Listener callback errors are caught and logged; they do not kill the listener.
+`InvalidationScopeView` exposes `.targetKind` (`'session'` / `'principal'` / `'role'`), `.targetId` (the matching id), `.reason`, and `.evaluator`. Listener callback errors are caught and logged; they do not kill the listener.
 
 The Node SDK does not ship a Redis binding yet. For multi-replica deployments the canonical fan-out is Redis Pub/Sub on the Rust side; see [distributed.md](distributed.md). Bridge to the Rust layer through a sidecar, or pair this in-process broadcaster with a Redis-backed listener you implement alongside your session cache.
 
@@ -408,12 +408,12 @@ import {
 const POLICY = {
   policies: [
     {
-      name: 'support_small_refunds',
+      name: 'support_refunds',
       effect: 'permit',
       conditions: [
         { identity_role: 'support' },
         { action: 'refunds.create' },
-        { param_max: { field: 'amount', max: 5000.0 } },
+        { param_max: { field: 'amount', max: 50_000.0 } },
       ],
     },
     {
