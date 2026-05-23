@@ -86,12 +86,20 @@ jobs:
         working-directory: kavach-node
         run: npm install --no-audit --no-fund
 
-      - name: Flatten artifact directory structure
+      - name: Reorganize artifacts into napi bindings-<triple> layout
         working-directory: kavach-node
         run: |
           find artifacts -name '*.node' -exec mv {} artifacts/ \;
           find artifacts -mindepth 1 -type d -empty -delete
-          ls -la artifacts/
+          mkdir -p artifacts/bindings-aarch64-apple-darwin
+          mv artifacts/kavach-engine.darwin-arm64.node       artifacts/bindings-aarch64-apple-darwin/
+          mkdir -p artifacts/bindings-x86_64-unknown-linux-gnu
+          mv artifacts/kavach-engine.linux-x64-gnu.node      artifacts/bindings-x86_64-unknown-linux-gnu/
+          mkdir -p artifacts/bindings-aarch64-unknown-linux-gnu
+          mv artifacts/kavach-engine.linux-arm64-gnu.node    artifacts/bindings-aarch64-unknown-linux-gnu/
+          mkdir -p artifacts/bindings-x86_64-pc-windows-msvc
+          mv artifacts/kavach-engine.win32-x64-msvc.node     artifacts/bindings-x86_64-pc-windows-msvc/
+          ls -R artifacts/
 
       - name: Move artifacts into per-platform npm packages
         working-directory: kavach-node
