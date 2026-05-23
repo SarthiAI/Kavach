@@ -101,6 +101,10 @@ jobs:
           mv artifacts/kavach-engine.win32-x64-msvc.node     artifacts/bindings-x86_64-pc-windows-msvc/
           ls -R artifacts/
 
+      - name: Scaffold npm/<platform>/ package dirs
+        working-directory: kavach-node
+        run: npx napi create-npm-dir -t .
+
       - name: Move artifacts into per-platform npm packages
         working-directory: kavach-node
         run: npx napi artifacts -d artifacts
