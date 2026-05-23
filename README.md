@@ -7,9 +7,11 @@
 
 <p align="center">
   <a href="https://pypi.org/project/kavach-sdk/"><img src="https://img.shields.io/pypi/v/kavach-sdk?style=flat-square&label=pypi&color=informational" alt="PyPI"></a>
+  <a href="https://www.npmjs.com/package/kavach-sdk"><img src="https://img.shields.io/npm/v/kavach-sdk?style=flat-square&label=npm&color=informational" alt="npm"></a>
   <a href="./docs/README.md"><img src="https://img.shields.io/badge/docs-read-informational?style=flat-square" alt="Docs"></a>
   <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-PQ%20ready-brightgreen?style=flat-square" alt="Security: PQ"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/node-18%2B-green?style=flat-square" alt="Node 18+">
 </p>
 
 ---
@@ -134,7 +136,9 @@ The SDK delegates every `evaluate` to the compiled Rust engine, so policy semant
 
 Policies can be loaded three ways: from a TOML string (operator-edited config), from a native Python dict (programmatic construction), or from a JSON file (tooling that already speaks JSON). All three accept the same vocabulary; typo'd field names raise a clear error in every loader instead of being silently dropped. See [docs/reference/policy-language.md](./docs/reference/policy-language.md#three-formats-one-schema).
 
-For 21 worked-through business scenarios (loan underwriting, healthcare PHI, AI agent attestation, signed permits across services, and the rest), see [business-tests-python/](./business-tests-python/). Each script is self-contained and runs against the published `kavach-sdk` wheel.
+The same policy schema, evaluator pipeline, and verdict shape are available in Node / TypeScript via `kavach-sdk` on npm. Construct with `Gate.fromObject(POLICY)` and evaluate with `gate.evaluate({ principalId, principalKind, actionName, params })`. Field names switch to camelCase on the Node side; everything else is identical.
+
+For 21 worked-through business scenarios (loan underwriting, healthcare PHI, AI agent attestation, signed permits across services, and the rest), see [business-tests-python/](./business-tests-python/) for the Python suite or [business-tests-node/](./business-tests-node/) for the Node mirror suite. Both run the same scenarios one-to-one and clear in under thirteen seconds end to end against the published packages.
 
 ## What you can build with it
 
@@ -148,12 +152,13 @@ For 21 worked-through business scenarios (loan underwriting, healthcare PHI, AI 
 ## Get started
 
 ```bash
-pip install kavach-sdk
+pip install kavach-sdk      # Python
+npm install kavach-sdk      # Node / TypeScript
 ```
 
-See the [Python guide](./docs/guides/python.md) or the [five-minute quickstart](./docs/quickstart.md). Full documentation under [docs/](./docs/README.md).
+See the [Python guide](./docs/guides/python.md), the [TypeScript guide](./docs/guides/typescript.md), or the [five-minute quickstart](./docs/quickstart.md). Full documentation under [docs/](./docs/README.md).
 
-**Only the Python SDK is released as of now.** The Node SDK, Rust crates, Redis-backed multi-node stack, HTTP middleware, and MCP tool gating are all built and under internal testing; they will be released as each passes validation. Progress is tracked in [docs/roadmap.md](./docs/roadmap.md).
+**Python and Node / TypeScript SDKs are released.** The direct Rust crates, Redis-backed multi-node stack, HTTP middleware, and MCP tool gating are all built and under internal testing; they will be released as each passes validation. Progress is tracked in [docs/roadmap.md](./docs/roadmap.md).
 
 ## Use with AI coding agents
 
@@ -163,7 +168,7 @@ Most modern coding agents (Claude Code, Cursor, Codex, Gemini CLI, and any other
 npx skills add SarthiAI/kavach-skill
 ```
 
-After install, ask your agent to "add Kavach to this Python service" and it produces correct integration code: policies authored in dict, JSON, or TOML form, the four built-in drift detectors wired in, post-quantum signed permit tokens with restart-safe key persistence, a tamper-evident `SignedAuditChain`, `SecureChannel` between services, and observe-mode rollout.
+After install, ask your agent to "add Kavach to this Python service" or "add Kavach to this Node / TypeScript service" and it produces correct integration code: policies authored in dict / object, JSON, or TOML form, the four built-in drift detectors wired in, post-quantum signed permit tokens with restart-safe key persistence, a tamper-evident `SignedAuditChain`, `SecureChannel` between services, and observe-mode rollout.
 
 ## How it works, a layer deeper
 
@@ -189,7 +194,8 @@ For multi-node deployments, pluggable `RateLimitStore`, `SessionStore`, and `Inv
 ├── kavach-redis/            Redis-backed distributed stores and invalidation broadcaster. (experimental)
 ├── docs/                    Full documentation, organized by concept, guide, operations, reference.
 ├── examples/                Reference policy files.
-├── business-tests-python/   21 self-contained SDK scenarios. Real business stories, runnable end to end.
+├── business-tests-python/   21 self-contained Python SDK scenarios. Real business stories, runnable end to end.
+├── business-tests-node/     21 self-contained Node SDK scenarios. One-to-one port of the Python suite.
 └── e2e-tests/               Internal end-to-end harness, lower-level wire traces.
 ```
 
