@@ -82,16 +82,24 @@ jobs:
           path: kavach-node/artifacts
           pattern: binary-*
 
-      - name: Move binaries to engine root
-        run: |
-          mv kavach-node/artifacts/*/*.node kavach-node/
-          ls -la kavach-node/*.node
-
       - name: Install npm deps (engine)
         working-directory: kavach-node
         run: npm install --no-audit --no-fund
 
-      - name: Generate and publish per-platform binary packages
+      - name: Move artifacts into per-platform npm packages
+        working-directory: kavach-node
+        run: npx napi artifacts -d artifacts
+
+      - name: List npm packages after artifacts
+        working-directory: kavach-node
+        run: |
+          ls -la npm/
+          for d in npm/*/; do
+            echo "--- $d ---"
+            ls -la "$d"
+          done
+
+      - name: Publish per-platform binary packages
         working-directory: kavach-node
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

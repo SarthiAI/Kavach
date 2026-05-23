@@ -1,6 +1,6 @@
 {
   "name": "kavach-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems. TypeScript SDK on a compiled Rust core.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -46,7 +46,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "kavach-engine": "0.1.0"
+    "kavach-engine": "0.1.1"
   },
   "devDependencies": {
     "typescript": "^5.0.0",
