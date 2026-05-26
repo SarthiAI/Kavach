@@ -3,7 +3,12 @@ name = "kavach-pq"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Post-quantum transport security, ML-KEM key encapsulation, ML-DSA signatures, hybrid channels, verdict signing"
+readme = "README.md"
+keywords = ["post-quantum", "ml-dsa", "ml-kem", "cryptography", "kavach"]
+categories = ["cryptography", "authentication"]
 
 [dependencies]
 kavach-core = { workspace = true }

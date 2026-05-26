@@ -4,7 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Redis-backed implementations of Kavach's distributed stores and invalidation broadcaster"
+readme = "README.md"
+keywords = ["redis", "rate-limit", "distributed", "session", "kavach"]
+categories = ["database", "caching", "web-programming"]
 
 [dependencies]
 kavach-core = { workspace = true }

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Node.js/TypeScript bindings for Kavach, compiled Rust engine exposed via napi-rs"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]

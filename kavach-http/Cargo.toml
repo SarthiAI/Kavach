@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 description = "Kavach HTTP middleware for Axum/Tower, gate every API endpoint"
 readme = "README.md"
+publish = false
 
 [dependencies]
 kavach-core = { workspace = true }

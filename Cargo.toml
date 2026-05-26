@@ -14,14 +14,14 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "LicenseRef-Elastic-2.0"
-license-file = "LICENSE"
 repository = "https://github.com/SarthiAI/Kavach"
+homepage = "https://github.com/SarthiAI/Kavach"
 description = "Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems"
 
 [workspace.dependencies]
-kavach-core = { path = "kavach-core" }
-kavach-pq = { path = "kavach-pq" }
-kavach-redis = { path = "kavach-redis" }
+kavach-core = { path = "kavach-core", version = "0.1.0" }
+kavach-pq = { path = "kavach-pq", version = "0.1.0" }
+kavach-redis = { path = "kavach-redis", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

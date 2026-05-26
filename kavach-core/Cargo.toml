@@ -3,7 +3,12 @@ name = "kavach-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Core execution boundary engine, gate, verdicts, identity, policy, drift, invariants"
+readme = "README.md"
+keywords = ["security", "agents", "policy", "gate", "kavach"]
+categories = ["authentication", "web-programming", "asynchronous"]
 
 [dependencies]
 serde = { workspace = true }

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 description = "Kavach middleware for MCP servers, gate every AI agent tool call"
 readme = "README.md"
+publish = false
 
 [dependencies]
 kavach-core = { workspace = true }
