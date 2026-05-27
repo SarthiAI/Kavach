@@ -34,7 +34,7 @@ pub struct KavachKeyPair {
 }
 ```
 
-Seeds, not expanded state: ML-DSA-65 stores the 32-byte `xi` and re-derives the full signing key on demand via `KeyGen::from_seed`. ML-KEM-768 stores a 64-byte seed and re-derives both keys via `FromSeed::from_seed`. Smaller on disk, easier to back up, and the seed is all FIPS 204 / FIPS 203 require.
+Seeds, not expanded state: ML-DSA-65 stores the 32-byte `xi` and re-derives the full signing key on demand via `SigningKey::from_seed`. ML-KEM-768 stores a 64-byte seed and re-derives both keys via `FromSeed::from_seed`. Smaller on disk, easier to back up, and the seed is all FIPS 204 / FIPS 203 require.
 
 **Secret bytes are zeroized on drop.** The `Drop` impl runs `zeroize` over every private-key field:
 

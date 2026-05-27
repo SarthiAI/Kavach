@@ -20,11 +20,11 @@ Internal cargo tests pass and the crate is wired into the Python and Node SDKs t
 
 ## Crypto dependency notes
 
-The crate pins release-candidate versions of `ml-dsa` and `ml-kem` with `=` because no stable release is published yet:
+The crate pins the first stable RustCrypto releases of `ml-dsa` and `ml-kem` with `=` to keep behaviour frozen across patch bumps:
 
 ```toml
-ml-dsa = "=0.1.0-rc.8"
-ml-kem = "=0.3.0-rc.2"
+ml-dsa = "=0.1.0"
+ml-kem = "=0.3.2"
 ```
 
 Two majors of `rand_core` (0.10 and 0.6) coexist by design: the post-quantum crates use 0.10, the classical halves (`x25519-dalek 2`, `ed25519-dalek 2`) use 0.6. OS randomness goes through `getrandom`, not the `rand` crate.

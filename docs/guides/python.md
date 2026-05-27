@@ -264,9 +264,9 @@ A verifier-only signer (no signing key material) is also supported via `PqTokenS
 
 ## Persisting signer identity across restarts
 
-In v0.1.0, `KavachKeyPair` does not expose secret-byte serialization. A keypair you generate inside the Python SDK lives in process memory only; on restart, a fresh keypair has a fresh `key_id` and the public bundle changes. There are two ways to live with this:
+In the current `0.1.x` line, `KavachKeyPair` does not expose secret-byte serialization. A keypair you generate inside the Python SDK lives in process memory only; on restart, a fresh keypair has a fresh `key_id` and the public bundle changes. There are two ways to live with this:
 
-### Pattern B (recommended for v0.1.0): regenerate at boot, redistribute the public bundle
+### Pattern B (recommended today): regenerate at boot, redistribute the public bundle
 
 Generate a fresh keypair on every gate-process boot, attach it to the gate, and push the public bundle to your verifier pool through whatever distribution path you operate (a config service, a Kubernetes ConfigMap, a `PublicKeyDirectory` file, etc.).
 

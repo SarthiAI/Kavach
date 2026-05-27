@@ -26,7 +26,7 @@ Used in Kavach for:
 - Signing `SignedAuditEntry` in the audit chain.
 - Signing `SignedDirectoryManifest` so a pinned root verifier can check the integrity of distributed public-key bundles.
 
-Implementation: the [ml-dsa](https://crates.io/crates/ml-dsa) crate from RustCrypto, pinned at `=0.1.0-rc.8`. The signing key is stored as the 32-byte seed `xi` from FIPS 204; the actual expanded state is derived on demand via `KeyGen::from_seed`.
+Implementation: the [ml-dsa](https://crates.io/crates/ml-dsa) crate from RustCrypto, pinned at `=0.1.0` (the first stable release implementing FIPS 204). The signing key is stored as the 32-byte seed `xi` from FIPS 204; the actual expanded state is derived on demand via `SigningKey::from_seed`.
 
 ### ML-KEM-768 (FIPS 203, key encapsulation)
 
@@ -39,7 +39,7 @@ Used in Kavach for:
 - `SecureChannel` between two services with `KavachKeyPair`s.
 - The encryption leg of `Encryptor` / `Decryptor` in `kavach-pq/src/encrypt.rs`.
 
-Implementation: the [ml-kem](https://crates.io/crates/ml-kem) crate, pinned at `=0.3.0-rc.2`. Kavach stores the decapsulation key as its seed and re-derives the full key on demand via `FromSeed::from_seed`, which keeps stored secrets compact and avoids cross-crate RNG trait issues.
+Implementation: the [ml-kem](https://crates.io/crates/ml-kem) crate, pinned at `=0.3.2` (a stable RustCrypto release implementing FIPS 203). Kavach stores the decapsulation key as its seed and re-derives the full key on demand via `FromSeed::from_seed`, which keeps stored secrets compact and avoids cross-crate RNG trait issues.
 
 ### Ed25519 (classical signatures)
 
@@ -138,8 +138,8 @@ assert!(
 
 | Purpose | Algorithm | Rust crate | Version pin |
 |---|---|---|---|
-| PQ signature | ML-DSA-65 (FIPS 204) | `ml-dsa` | `=0.1.0-rc.8` |
-| PQ key encapsulation | ML-KEM-768 (FIPS 203) | `ml-kem` | `=0.3.0-rc.2` |
+| PQ signature | ML-DSA-65 (FIPS 204) | `ml-dsa` | `=0.1.0` |
+| PQ key encapsulation | ML-KEM-768 (FIPS 203) | `ml-kem` | `=0.3.2` |
 | Classical signature | Ed25519 | `ed25519-dalek` | `2` |
 | Classical key agreement | X25519 | `x25519-dalek` | `2` (with `static_secrets`) |
 | AEAD (channel payload) | ChaCha20-Poly1305 | `chacha20poly1305` | `0.10` |
@@ -150,20 +150,20 @@ assert!(
 
 The full dep list lives in [kavach-pq/Cargo.toml](../../kavach-pq/Cargo.toml).
 
-## Release candidates: the honest disclaimer
+## Crypto pins: exact-version, stable-only
 
-`ml-dsa` and `ml-kem` are pinned to release candidates. **This is normal in the Rust post-quantum ecosystem right now.** RustCrypto is doing the careful thing: FIPS 203 and FIPS 204 both shipped as final standards in August 2024, and the implementations have been iterating on the final spec since. No one in the Rust PQ space has cut a stable 1.0 yet because the spec settled recently and the team wants more cryptanalysis and more review time before committing to API stability.
+`ml-dsa` and `ml-kem` are pinned to the first stable RustCrypto releases that implement the FIPS-final standards (`ml-dsa 0.1.0` for FIPS 204, `ml-kem 0.3.2` for FIPS 203).
 
 Kavach pins with `=` (exact-version match) to freeze the behavior:
 
 ```toml
-ml-kem = "=0.3.0-rc.2"
-ml-dsa = "=0.1.0-rc.8"
+ml-kem = "=0.3.2"
+ml-dsa = "=0.1.0"
 ```
 
-Upstream RC bumps will not silently enter your build. When stable releases ship, Kavach will upgrade in a patch release and note the change in the security section of the release notes.
+Upstream patch bumps will not silently enter your build. Any future upgrade lands in a Kavach patch release and is noted in the security section of the release notes.
 
-The classical primitives (Ed25519, X25519, ChaCha20-Poly1305, SHA-256, HKDF) are all at stable, long-audited versions. The hybrid composition means even if an RC bug turned out to break ML-DSA or ML-KEM, the classical leg still protects you.
+The classical primitives (Ed25519, X25519, ChaCha20-Poly1305, SHA-256, HKDF) are all at stable, long-audited versions. The hybrid composition means even if a future PQ bug turned out to affect ML-DSA or ML-KEM, the classical leg still protects you.
 
 ## What to read next
 

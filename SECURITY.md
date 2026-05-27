@@ -103,8 +103,8 @@ Not in the model:
 
 | Purpose | Algorithm | Crate |
 |---------|-----------|-------|
-| Signature (PQ) | ML-DSA-65 | `ml-dsa = "=0.1.0-rc.8"` |
-| Key encapsulation (PQ) | ML-KEM-768 | `ml-kem = "=0.3.0-rc.2"` |
+| Signature (PQ) | ML-DSA-65 | `ml-dsa = "=0.1.0"` |
+| Key encapsulation (PQ) | ML-KEM-768 | `ml-kem = "=0.3.2"` |
 | Signature (classical) | Ed25519 | `ed25519-dalek 2` |
 | Key agreement (classical) | X25519 | `x25519-dalek 2` |
 | AEAD | ChaCha20-Poly1305 | `chacha20poly1305` |
@@ -112,7 +112,7 @@ Not in the model:
 | KDF | HKDF-SHA-256 | `hkdf` |
 | RNG | OS `getrandom` | `getrandom` |
 
-ML-DSA and ML-KEM are pinned to release-candidate versions. When stable releases ship we will update in a patch release and note it in the security-relevant section of the release notes.
+ML-DSA and ML-KEM are pinned to the first stable RustCrypto releases (`ml-dsa 0.1.0`, `ml-kem 0.3.2`), both implementing the FIPS-final standards. Any future upgrades will be noted in the security-relevant section of the release notes.
 
 ---
 

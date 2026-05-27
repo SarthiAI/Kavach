@@ -22,8 +22,8 @@ async-trait = { workspace = true }
 tokio = { workspace = true }
 
 # Post-quantum cryptography (NIST-approved, audited implementations)
-ml-kem = "=0.3.0-rc.2"       # FIPS 203: key encapsulation (formerly Kyber)
-ml-dsa = "=0.1.0-rc.8"       # FIPS 204: digital signatures (formerly Dilithium)
+ml-kem = "=0.3.2"            # FIPS 203: key encapsulation (formerly Kyber)
+ml-dsa = "=0.1.0"            # FIPS 204: digital signatures (formerly Dilithium)
 
 # Classical cryptography (for hybrid mode)
 x25519-dalek = { version = "2", features = ["static_secrets"] }

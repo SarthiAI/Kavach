@@ -207,7 +207,7 @@ Two additional crates (`kavach-http`, `kavach-mcp`) live in the workspace. They 
 
 - **Tests:** 163 Rust, 139 Python SDK, 133 Node SDK, 21 end-to-end scenarios. All green under `RUSTFLAGS="-D warnings"` and `cargo clippy -- -D warnings`.
 - **CI:** GitHub Actions, 5-OS matrix (Linux x64 and arm64, macOS x64 and arm64, Windows x64). Wheel and native-addon builds per platform.
-- **Crypto primitives** are on release candidates of `ml-dsa` (`0.1.0-rc.8`) and `ml-kem` (`0.3.0-rc.2`). This matches the Rust PQ ecosystem; every PQ library is on pinned RC until RustCrypto ships 1.0. See [SECURITY.md](./SECURITY.md) for threat model, disclosure, and scope.
+- **Crypto primitives** track the stable RustCrypto releases of `ml-dsa` (`=0.1.0`) and `ml-kem` (`=0.3.2`), both FIPS-final implementations. See [SECURITY.md](./SECURITY.md) for threat model, disclosure, and scope.
 - **Observe mode:** set `GateConfig::observe_only = true` to log every would-be verdict without blocking. The recommended first-week rollout path.
 
 ## Documentation

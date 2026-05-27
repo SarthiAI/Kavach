@@ -105,16 +105,16 @@ vendoring them in. The public project does not support that usage yet.
 
 ## Planned: `KavachKeyPair` byte serialization in the Python SDK
 
-The Python `KavachKeyPair` exposes no secret-byte serialization in v0.1.0.
-A keypair you generate via `KavachKeyPair.generate()` cannot be dumped to
-bytes for KMS or HSM persistence and later rehydrated through the SDK.
-Stable signer identity across process restarts therefore requires either
-regenerating per restart and redistributing the public bundle (the
-recommended pattern for v0.1.0) or sourcing raw ML-DSA-65 key bytes from a
-non-Kavach generator (for example, an HSM with native ML-DSA-65 support)
-and feeding them to `PqTokenSigner.hybrid(...)`. The Rust side already
-supports byte access directly on `KavachKeyPair`; this is a binding gap,
-not a fundamental one.
+The Python `KavachKeyPair` exposes no secret-byte serialization in the
+current `0.1.x` line. A keypair you generate via `KavachKeyPair.generate()`
+cannot be dumped to bytes for KMS or HSM persistence and later rehydrated
+through the SDK. Stable signer identity across process restarts therefore
+requires either regenerating per restart and redistributing the public
+bundle (the recommended pattern today) or sourcing raw ML-DSA-65 key bytes
+from a non-Kavach generator (for example, an HSM with native ML-DSA-65
+support) and feeding them to `PqTokenSigner.hybrid(...)`. The Rust side
+already supports byte access directly on `KavachKeyPair`; this is a
+binding gap, not a fundamental one.
 
 When this comes out of planned, `KavachKeyPair` will expose
 `export_secret_bytes()` and `KavachKeyPair.from_bytes(...)` (or equivalent

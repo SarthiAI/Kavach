@@ -15,7 +15,7 @@ use chrono::{DateTime, Duration, Utc};
 use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey};
 use ml_dsa::signature::Keypair as MlDsaKeypair;
 use ml_dsa::{
-    EncodedVerifyingKey, KeyGen, MlDsa65, SigningKey as MlDsaSigningKey,
+    EncodedVerifyingKey, MlDsa65, SigningKey as MlDsaSigningKey,
     VerifyingKey as MlDsaVerifyingKey, B32,
 };
 use ml_kem::array::Array;
@@ -85,11 +85,11 @@ impl KavachKeyPair {
 
         // ── ML-DSA-65 (FIPS 204 signatures) ──────────────────────────
         // Generate a 32-byte seed xi and derive the signing key from it
-        // via FIPS 204's KeyGen_internal (ml_dsa::KeyGen::from_seed).
+        // via FIPS 204's KeyGen_internal (ml_dsa::SigningKey::from_seed).
         let mut dsa_xi_bytes = [0u8; 32];
         fill_random(&mut dsa_xi_bytes)?;
         let dsa_xi = B32::from(dsa_xi_bytes);
-        let dsa_kp = <MlDsa65 as KeyGen>::from_seed(&dsa_xi);
+        let dsa_kp = MlDsaSigningKey::<MlDsa65>::from_seed(&dsa_xi);
         let ml_dsa_verifying_key = MlDsaKeypair::verifying_key(&dsa_kp)
             .encode()
             .as_slice()
@@ -272,7 +272,7 @@ pub(crate) fn load_ml_dsa_signing_key(seed_bytes: &[u8]) -> Result<MlDsaSigningK
     }
     let mut arr = [0u8; 32];
     arr.copy_from_slice(seed_bytes);
-    Ok(<MlDsa65 as KeyGen>::from_seed(&B32::from(arr)))
+    Ok(MlDsaSigningKey::<MlDsa65>::from_seed(&B32::from(arr)))
 }
 
 /// Reconstruct an ML-KEM-768 encapsulation key from its encoded form.
