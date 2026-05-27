@@ -8,6 +8,9 @@
 <p align="center">
   <a href="https://pypi.org/project/kavach-sdk/"><img src="https://img.shields.io/pypi/v/kavach-sdk?style=flat-square&label=pypi&color=informational" alt="PyPI"></a>
   <a href="https://www.npmjs.com/package/kavach-sdk"><img src="https://img.shields.io/npm/v/kavach-sdk?style=flat-square&label=npm&color=informational" alt="npm"></a>
+  <a href="https://crates.io/crates/kavach-core"><img src="https://img.shields.io/crates/v/kavach-core?style=flat-square&label=kavach-core&color=informational" alt="crates.io: kavach-core"></a>
+  <a href="https://crates.io/crates/kavach-pq"><img src="https://img.shields.io/crates/v/kavach-pq?style=flat-square&label=kavach-pq&color=informational" alt="crates.io: kavach-pq"></a>
+  <a href="https://crates.io/crates/kavach-redis"><img src="https://img.shields.io/crates/v/kavach-redis?style=flat-square&label=kavach-redis&color=informational" alt="crates.io: kavach-redis"></a>
   <a href="./docs/README.md"><img src="https://img.shields.io/badge/docs-read-informational?style=flat-square" alt="Docs"></a>
   <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-PQ%20ready-brightgreen?style=flat-square" alt="Security: PQ"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+">
@@ -154,11 +157,12 @@ For 21 worked-through business scenarios (loan underwriting, healthcare PHI, AI 
 ```bash
 pip install kavach-sdk      # Python
 npm install kavach-sdk      # Node / TypeScript
+cargo add kavach-core       # Rust (also: kavach-pq, kavach-redis)
 ```
 
-See the [Python guide](./docs/guides/python.md), the [TypeScript guide](./docs/guides/typescript.md), or the [five-minute quickstart](./docs/quickstart.md). Full documentation under [docs/](./docs/README.md).
+See the [Python guide](./docs/guides/python.md), the [TypeScript guide](./docs/guides/typescript.md), the [Rust guide](./docs/guides/rust.md), or the [five-minute quickstart](./docs/quickstart.md). Full documentation under [docs/](./docs/README.md).
 
-**Python and Node / TypeScript SDKs are released.** The direct Rust crates, Redis-backed multi-node stack, HTTP middleware, and MCP tool gating are all built and under internal testing; they will be released as each passes validation. Progress is tracked in [docs/roadmap.md](./docs/roadmap.md).
+**Python and Node / TypeScript SDKs are the consumer-validated published surfaces** (covered end to end by `business-tests-python/` and `business-tests-node/`). The Rust crates (`kavach-core`, `kavach-pq`, `kavach-redis`) are also published on crates.io with their own cargo-level test coverage, but treated as experimental until a dedicated consumer-validation tier covers direct-Rust usage. HTTP middleware (`kavach-http`) and MCP tool gating (`kavach-mcp`) are still under internal testing and not yet published. Progress is tracked in [docs/roadmap.md](./docs/roadmap.md).
 
 ## Use with AI coding agents
 
