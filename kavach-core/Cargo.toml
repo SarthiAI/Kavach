@@ -21,6 +21,7 @@ uuid = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
+arc-swap = { workspace = true }
 
 # Hot-reload file watcher, opt-in so projects that don't need it don't
 # pay the `notify` build cost.

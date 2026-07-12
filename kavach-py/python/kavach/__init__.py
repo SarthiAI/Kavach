@@ -40,7 +40,7 @@ from kavach.decorators import guarded, guarded_tool
 from kavach.mcp import McpKavachMiddleware
 from kavach.http import HttpKavachMiddleware
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 __all__ = [
     "Gate",
     "ActionContext",

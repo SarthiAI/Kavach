@@ -3,9 +3,10 @@ use crate::error::PolicyError;
 use crate::evaluator::Evaluator;
 use crate::rate_limit::{InMemoryRateLimitStore, RateLimitStore};
 use crate::verdict::{PermitToken, RefuseCode, RefuseReason, Verdict};
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 /// A set of policies loaded from configuration.
 ///
@@ -131,20 +132,19 @@ pub enum Condition {
 }
 
 impl Condition {
-    /// Evaluate this condition against an action context.
+    /// Evaluate the condition without any I/O.
     ///
-    /// Most conditions are purely synchronous. [`Condition::RateLimit`] is the
-    /// exception, it queries the pluggable [`RateLimitStore`], which may be
-    /// a remote backend. On any store error the condition evaluates to
-    /// `false` (fail-closed): the gate refuses to attest that the caller is
-    /// under the limit when the backend can't prove it.
-    pub async fn matches(
-        &self,
-        ctx: &ActionContext,
-        rate_store: &dyn RateLimitStore,
-        now: i64,
-    ) -> bool {
-        match self {
+    /// Returns `Some(true)` / `Some(false)` for the ten conditions that are a
+    /// pure function of `(ctx, now)`, and `None` for [`Condition::RateLimit`],
+    /// the only variant that needs the pluggable [`RateLimitStore`]. The engine
+    /// uses this to avoid constructing and polling a future for every condition
+    /// on the hot path, only `RateLimit` falls through to the async path.
+    ///
+    /// Fail-closed semantics are identical to [`Condition::matches`]: a missing
+    /// `params[field]` fails `ParamMax`/`ParamMin`/`ParamIn`; a malformed
+    /// `TimeWindow` fails closed.
+    fn matches_sync(&self, ctx: &ActionContext, _now: i64) -> Option<bool> {
+        let verdict = match self {
             Condition::IdentityRole(role) => ctx.principal.roles.contains(role),
 
             Condition::IdentityKind(kind) => &ctx.principal.kind == kind,
@@ -171,6 +171,47 @@ impl Condition {
                 .map(|v| values.iter().any(|allowed| allowed == v))
                 .unwrap_or(false),
 
+            // The only variant that needs the store: defer to the async path.
+            Condition::RateLimit { .. } => return None,
+
+            Condition::SessionAgeMax(max_age) => {
+                let max_secs = parse_duration_secs(max_age).unwrap_or(86400);
+                ctx.session.age().num_seconds() <= max_secs as i64
+            }
+
+            Condition::Resource(pattern) => ctx
+                .action
+                .resource
+                .as_ref()
+                .map(|r| match_pattern(pattern, r))
+                .unwrap_or(false),
+
+            Condition::TimeWindow(window) => evaluate_time_window(window, ctx.evaluated_at),
+        };
+        Some(verdict)
+    }
+
+    /// Evaluate this condition against an action context.
+    ///
+    /// Most conditions are purely synchronous and are answered by
+    /// [`Condition::matches_sync`] without any await. [`Condition::RateLimit`]
+    /// is the exception, it queries the pluggable [`RateLimitStore`], which may
+    /// be a remote backend. On any store error the condition evaluates to
+    /// `false` (fail-closed): the gate refuses to attest that the caller is
+    /// under the limit when the backend can't prove it.
+    pub async fn matches(
+        &self,
+        ctx: &ActionContext,
+        rate_store: &dyn RateLimitStore,
+        now: i64,
+    ) -> bool {
+        // Pure conditions never touch the store.
+        if let Some(verdict) = self.matches_sync(ctx, now) {
+            return verdict;
+        }
+
+        // Only `RateLimit` reaches here.
+        match self {
             Condition::RateLimit { max, window } => {
                 // The current call has already been recorded by `PolicyEngine::evaluate`
                 // before policies are checked. So `count` here is inclusive of this
@@ -189,20 +230,38 @@ impl Condition {
                     }
                 }
             }
+            // Unreachable: every non-RateLimit variant returned `Some` above.
+            _ => unreachable!("non-RateLimit condition must resolve synchronously"),
+        }
+    }
+}
 
-            Condition::SessionAgeMax(max_age) => {
-                let max_secs = parse_duration_secs(max_age).unwrap_or(86400);
-                ctx.session.age().num_seconds() <= max_secs as i64
-            }
+/// A policy set compiled into the form the hot path reads.
+///
+/// Built once per load / reload and published behind an [`ArcSwap`], so every
+/// request reads it wait-free with a single atomic load, no per-request clone,
+/// no lock. Holding the returned `Arc` across `.await` points is sound (unlike
+/// a `RwLockReadGuard`), so the engine no longer deep-clones the policy list
+/// just to release a lock before awaiting store I/O.
+struct CompiledPolicySet {
+    /// Policies sorted by ascending priority (lower priority = checked first).
+    policies: Vec<Policy>,
+    /// True if any condition anywhere is [`Condition::RateLimit`]. When false,
+    /// `evaluate` skips the per-request `rate_store.record(...)` entirely, no
+    /// store write, no key allocation, because nothing will ever query it.
+    has_rate_limit: bool,
+}
 
-            Condition::Resource(pattern) => ctx
-                .action
-                .resource
-                .as_ref()
-                .map(|r| match_pattern(pattern, r))
-                .unwrap_or(false),
-
-            Condition::TimeWindow(window) => evaluate_time_window(window, ctx.evaluated_at),
+impl CompiledPolicySet {
+    fn new(mut policies: Vec<Policy>) -> Self {
+        policies.sort_by_key(|p| p.priority);
+        let has_rate_limit = policies
+            .iter()
+            .flat_map(|p| &p.conditions)
+            .any(|c| matches!(c, Condition::RateLimit { .. }));
+        Self {
+            policies,
+            has_rate_limit,
         }
     }
 }
@@ -214,7 +273,7 @@ impl Condition {
 /// determines the verdict. If no policy matches, the default is **Refuse**
 /// (default-deny).
 pub struct PolicyEngine {
-    policies: RwLock<Vec<Policy>>,
+    policies: ArcSwap<CompiledPolicySet>,
     rate_store: Arc<dyn RateLimitStore>,
 }
 
@@ -229,10 +288,8 @@ impl PolicyEngine {
     /// to plug in a distributed backend (Redis, etc.) so rate-limit counts
     /// are consistent across nodes.
     pub fn with_rate_store(policy_set: PolicySet, rate_store: Arc<dyn RateLimitStore>) -> Self {
-        let mut policies = policy_set.policies;
-        policies.sort_by_key(|p| p.priority);
         Self {
-            policies: RwLock::new(policies),
+            policies: ArcSwap::from_pointee(CompiledPolicySet::new(policy_set.policies)),
             rate_store,
         }
     }
@@ -240,47 +297,50 @@ impl PolicyEngine {
     /// Hot-reload the policy set.
     ///
     /// Takes `&self` (not `&mut self`) so it is callable through an
-    /// `Arc<PolicyEngine>` that is shared with a `Gate`. Interior mutability
-    /// is provided by an `RwLock` around the policy list, in-flight
-    /// evaluations continue to see the old set until they finish and release
-    /// their read lock; subsequent evaluations pick up the new set.
+    /// `Arc<PolicyEngine>` that is shared with a `Gate`. The new set is
+    /// compiled and swapped in atomically via [`ArcSwap`]: in-flight
+    /// evaluations keep the `Arc` they already loaded and finish against the
+    /// old set; every subsequent evaluation loads the new one. No lock, no
+    /// waiter blocked on a slow rate-limit backend.
     pub fn reload(&self, policy_set: PolicySet) {
-        let mut new_policies = policy_set.policies;
-        new_policies.sort_by_key(|p| p.priority);
-        let new_len = new_policies.len();
-        let mut guard = self.policies.write().unwrap();
-        *guard = new_policies;
+        let compiled = CompiledPolicySet::new(policy_set.policies);
+        let new_len = compiled.policies.len();
+        self.policies.store(Arc::new(compiled));
         tracing::info!("policies reloaded: {} rules", new_len);
     }
 
     /// Number of policies currently loaded (for observability / tests).
     pub fn policy_count(&self) -> usize {
-        self.policies.read().unwrap().len()
+        self.policies.load().policies.len()
     }
 
-    /// Find the first matching policy for the given context.
+    /// Find the first matching policy in a compiled snapshot.
     ///
-    /// Clones the policy list under the read lock, then releases the lock
-    /// before awaiting any store I/O. This avoids holding the policy-list
-    /// lock across `.await` points, which would be unsound with
-    /// `std::sync::RwLock` (not `Send` across awaits) and would also block
-    /// hot-reload waiters on slow rate-limit backends.
-    async fn find_matching_policy(&self, ctx: &ActionContext, now: i64) -> Option<Policy> {
-        let snapshot: Vec<Policy> = {
-            let guard = self.policies.read().unwrap();
-            guard.clone()
-        };
-
-        for policy in snapshot {
+    /// Takes the snapshot the caller already loaded so the record decision and
+    /// the match scan see one consistent policy generation. Pure conditions are
+    /// answered synchronously via [`Condition::matches_sync`]; only
+    /// [`Condition::RateLimit`] falls through to the async store path.
+    async fn find_matching_policy(
+        &self,
+        compiled: &CompiledPolicySet,
+        ctx: &ActionContext,
+        now: i64,
+    ) -> Option<Policy> {
+        for policy in &compiled.policies {
             let mut all_match = true;
             for cond in &policy.conditions {
-                if !cond.matches(ctx, &*self.rate_store, now).await {
+                let ok = match cond.matches_sync(ctx, now) {
+                    Some(verdict) => verdict,
+                    // Only `RateLimit` reaches the async store path.
+                    None => cond.matches(ctx, &*self.rate_store, now).await,
+                };
+                if !ok {
                     all_match = false;
                     break;
                 }
             }
             if all_match {
-                return Some(policy);
+                return Some(policy.clone());
             }
         }
         None
@@ -298,30 +358,40 @@ impl Evaluator for PolicyEngine {
     }
 
     async fn evaluate(&self, ctx: &ActionContext) -> Verdict {
-        // Record this action for rate limiting. `now` is captured once and
-        // used for both the record and any in-window counts so every
-        // condition sees the same clock, this matters because record and
-        // count can race against each other across async awaits.
+        // Load the compiled policy set once. `now` is captured once and used for
+        // both the record and any in-window counts so every condition sees the
+        // same clock, this matters because record and count can race against
+        // each other across async awaits. Reading the snapshot once here also
+        // guarantees the record decision and the match scan see one consistent
+        // policy generation even if a reload lands mid-evaluation.
         let now = chrono::Utc::now().timestamp();
-        let key = format!("{}:{}", ctx.principal.id, ctx.action.name);
-        if let Err(err) = self.rate_store.record(&key, now).await {
-            // Recording failed, we must decide whether to refuse the action
-            // entirely. Default-deny: refuse, because any subsequent
-            // rate-limit check would be based on under-counted state.
-            tracing::warn!(
-                error = %err,
-                key = %key,
-                "rate-limit store record failed, refusing action",
-            );
-            return Verdict::Refuse(RefuseReason {
-                evaluator: "policy".to_string(),
-                reason: "rate-limit backend unavailable".to_string(),
-                code: RefuseCode::PolicyDenied,
-                evaluation_id: ctx.evaluation_id,
-            });
+        let compiled = self.policies.load_full();
+
+        // Record this action for rate limiting, but only when the loaded policy
+        // set actually has a rate-limit condition. If none does, nothing will
+        // ever query the store, so the write (a global lock on the in-memory
+        // store) and the key allocation are pure waste on the hot path.
+        if compiled.has_rate_limit {
+            let key = format!("{}:{}", ctx.principal.id, ctx.action.name);
+            if let Err(err) = self.rate_store.record(&key, now).await {
+                // Recording failed, we must decide whether to refuse the action
+                // entirely. Default-deny: refuse, because any subsequent
+                // rate-limit check would be based on under-counted state.
+                tracing::warn!(
+                    error = %err,
+                    key = %key,
+                    "rate-limit store record failed, refusing action",
+                );
+                return Verdict::Refuse(RefuseReason {
+                    evaluator: "policy".to_string(),
+                    reason: "rate-limit backend unavailable".to_string(),
+                    code: RefuseCode::PolicyDenied,
+                    evaluation_id: ctx.evaluation_id,
+                });
+            }
         }
 
-        match self.find_matching_policy(ctx, now).await {
+        match self.find_matching_policy(&compiled, ctx, now).await {
             Some(policy) if policy.effect == Effect::Permit => {
                 tracing::debug!(policy = %policy.name, "policy permits action");
                 Verdict::Permit(PermitToken::new(ctx.evaluation_id, ctx.action.name.clone()))

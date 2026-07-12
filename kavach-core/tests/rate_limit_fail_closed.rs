@@ -104,11 +104,17 @@ impl RateLimitStore for SpyStore {
 
 #[tokio::test]
 async fn record_failure_causes_evaluation_to_refuse() {
+    // The policy uses a `rate_limit` condition, so the engine records the
+    // action to the store before checking policies. If that record fails, the
+    // whole evaluation fails closed (refuse), because any subsequent count
+    // would be based on under-counted state. The engine only writes the store
+    // when a rate-limit rule is present; a policy with no rate-limit condition
+    // never touches the store, so there is nothing to fail on.
     let toml = r#"
 [[policy]]
 name = "permit_all"
 effect = "permit"
-conditions = [{ action = "act" }]
+conditions = [{ action = "act" }, { rate_limit = { max = 5, window = "1m" } }]
 "#;
     let engine = Arc::new(PolicyEngine::with_rate_store(
         PolicySet::from_toml(toml).unwrap(),
