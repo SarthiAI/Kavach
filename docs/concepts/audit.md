@@ -236,11 +236,27 @@ kavach_pq::audit::verify_chain(&entries, &verifier)?;
 
 A non-zero exit on any of these is the monitoring signal you want.
 
+## Bounded memory: pruning and the managed chain
+
+A plain `SignedAuditChain` retains every entry it appends. A process that signs one entry per request and runs for weeks grows resident memory without bound. Two additive tools keep memory flat while preserving the hash linkage end to end.
+
+**The prune primitive.** After you durably persist entries `[0, k)`, call `prune_before(k)` to drop them from memory. Pruning does not touch the head hash or the running index, so entry `k` still carries `previous_hash = hash(entry k-1)`. Concatenating the persisted prefix with the in-memory tail reproduces one continuous chain that `verify_chain` accepts from genesis. Companions: `entries_since(k)` reads the retained tail by logical index (erroring loudly if `k` was already evicted), `base_index()` is the oldest in-memory index, and `anchor_hash()` is the `previous_hash` the tail chains from, so `verify_chain_from(tail, verifier, anchor_hash())` verifies the tail in isolation. `verify_segments([...])` stitches several on-disk files plus the tail and reports the first break at the right boundary.
+
+**The managed chain.** `ManagedAuditChain` runs the flush-then-prune cycle for you. You give it a sink (a JSONL file, or your own `AuditSink`) and a `RetentionPolicy`:
+
+- `max_entries`: evict when the in-memory window exceeds N entries.
+- `max_bytes`: evict when the estimated in-memory bytes exceed M.
+- `flush_interval`: evict on a timer, even below the size thresholds.
+- `min_retained`: always keep this many most-recent entries hot.
+- `on_sink_failure`: `Buffer { buffer_ceiling }` (keep unflushed entries and retry, then hard-reject at the ceiling) or `RejectAppends` (reject as soon as the sink is down and the window is over threshold).
+
+Any combination of the three triggers can be set; whichever fires first evicts down to `min_retained`. Eviction is transactional: entries are pruned from memory **only after** the sink confirms a durable (fsynced) write, so a sink failure never loses data, it applies backpressure instead. Internally the chain state is a single `Mutex<VecDeque<SignedAuditEntry>>` so `append` and `prune_before` are atomic with respect to each other and `append` stays O(1) on the hot path.
+
 ## What the chain does not do
 
 Honest limits, straight from the code:
 
-- **The chain is append-only in memory, not on disk.** `SignedAuditChain` holds its entries in a `RwLock<Vec<SignedAuditEntry>>`. Persisting is the integrator's job: call `export_jsonl()` periodically, write to durable storage, and rotate files on boundaries that make sense for you.
+- **Durability policy is yours to choose.** A plain `SignedAuditChain` holds its entries in memory (a `Mutex<VecDeque<SignedAuditEntry>>`); persisting is the integrator's job via `export_jsonl()`. For a bounded-memory, disk-backed setup use `ManagedAuditChain` (see above), which persists and prunes for you but still leaves file rotation and retention windows to you.
 - **Key rotation is out of the chain's scope.** Entries stamp `key_id` into the signed payload, so a verifier can look up the right key, but rotating the signing key mid-chain is a policy choice. See [key-management.md](./key-management.md).
 - **The chain does not enforce ordering across processes.** Two processes appending to two separate chains produce two separate linear histories. Merging them is a product decision, not a crypto operation.
 - **`AuditEntry`'s content is not canonicalized.** The chain signs `serde_json::to_vec(&entry)`. If you reserialize the entry with a different JSON library, you may get different bytes and the signature will not verify. Do not reserialize; keep the original bytes.

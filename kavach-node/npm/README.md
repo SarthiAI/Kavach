@@ -144,6 +144,24 @@ const blob = chain.exportJsonl();
 SignedAuditChain.verifyJsonl(blob, kp.publicKeys());
 ```
 
+**Bounded memory for long-running services.** A plain `SignedAuditChain` keeps every entry in RAM, so a service that appends forever grows without bound. `ManagedAuditChain` streams old entries to a JSONL file and prunes them from memory under a retention policy you configure by entry count, by bytes, on a timer, or any combination. The full chain still verifies across the on-disk file plus the in-memory tail.
+
+```typescript
+import { ManagedAuditChain, SignedAuditChain } from 'kavach-sdk';
+import { readFileSync } from 'fs';
+
+const chain = new ManagedAuditChain(kp, 'audit.jsonl', {
+  maxEntries: 10_000,          // evict when the window exceeds 10k entries
+  maxBytes: 64 * 1024 * 1024,  // ...or 64 MB, whichever first
+  flushIntervalMs: 1000,       // ...or once per second, even below the sizes
+  onSinkFailure: 'reject',     // back-pressure if the disk is unavailable
+});
+for (const entry of stream()) chain.append(entry);  // append forever; memory plateaus
+
+const disk = readFileSync('audit.jsonl');
+SignedAuditChain.verifyJsonl(Buffer.concat([disk, chain.exportTailJsonl()]), kp.publicKeys());
+```
+
 ### Secure channel
 
 Hybrid-encrypted, PQ-signed byte channel between two peers. Sealed payloads are opaque; ship them over any transport.

@@ -22,6 +22,7 @@ from kavach._kavach_engine import (
     InvalidationListenerHandle,
     InvalidationScope,
     KavachKeyPair,
+    ManagedAuditChain,
     PermitToken,
     PqTokenSigner,
     PublicKeyBundle,
@@ -39,7 +40,7 @@ from kavach.decorators import guarded, guarded_tool
 from kavach.mcp import McpKavachMiddleware
 from kavach.http import HttpKavachMiddleware
 
-__version__ = "0.1.0"
+__version__ = "0.1.3"
 __all__ = [
     "Gate",
     "ActionContext",
@@ -52,6 +53,7 @@ __all__ = [
     "PublicKeyBundle",
     "AuditEntry",
     "SignedAuditChain",
+    "ManagedAuditChain",
     "SecureChannel",
     "PublicKeyDirectory",
     "DirectoryTokenVerifier",

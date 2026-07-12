@@ -12,6 +12,7 @@
 //! Every algorithm comes from audited RustCrypto crates. We compose, not invent.
 
 pub mod audit;
+pub mod audit_sink;
 pub mod channel;
 pub mod directory;
 pub mod encrypt;
@@ -24,7 +25,13 @@ pub mod sign;
 pub mod token;
 pub mod verdict;
 
-pub use audit::{ChainMode, SignedAuditChain, SignedAuditEntry};
+pub use audit::{
+    verify_chain, verify_chain_from, verify_segments, ChainMode, SignedAuditChain,
+    SignedAuditEntry,
+};
+pub use audit_sink::{
+    AuditSink, FileAuditSink, ManagedAuditChain, ManagedStats, RetentionPolicy, SinkFailurePolicy,
+};
 pub use channel::{SealedVerdict, SecureChannel, SignedBytes};
 pub use directory::{
     FilePublicKeyDirectory, InMemoryPublicKeyDirectory, KeyDirectoryError, PublicKeyDirectory,

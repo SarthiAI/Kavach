@@ -372,6 +372,45 @@ SignedAuditChain.verify_jsonl(blob, kp.public_keys(), hybrid=True) # strict asse
 
 A PQ-only verifier presented with a hybrid blob is rejected (silent-downgrade defense). Passing `hybrid=False` explicitly on a hybrid blob raises.
 
+### Bounded memory for long-running services
+
+`SignedAuditChain` keeps every entry it appends in memory. A service that signs one entry per request and runs for weeks will grow resident memory without bound. For that shape, use `ManagedAuditChain`: it streams older entries to a JSONL file on disk and prunes them from RAM under a retention policy you configure. The full chain stays tamper-evident and verifies across the on-disk file plus the in-memory tail.
+
+```python
+from kavach import AuditEntry, KavachKeyPair, ManagedAuditChain, SignedAuditChain
+
+kp = KavachKeyPair.generate()
+
+# Cap the in-memory window by entry count AND by bytes, and flush on a timer.
+# Any combination of the three triggers can be set; whichever fires first evicts
+# down to min_retained. on_sink_failure="reject" applies backpressure (append
+# raises) if the disk is unavailable, instead of growing until OOM.
+chain = ManagedAuditChain(
+    kp,
+    "audit.jsonl",
+    hybrid=True,
+    max_entries=10_000,        # evict when the window exceeds 10k entries
+    max_bytes=64 * 1024 * 1024,  # ...or 64 MB, whichever first
+    flush_interval_secs=1.0,   # ...or once per second, even below the sizes
+    min_retained=256,          # always keep the 256 most-recent entries hot
+    on_sink_failure="reject",  # or "buffer" (default) with a hard ceiling
+)
+
+for entry in stream_of_decisions():        # append as usual, forever
+    chain.append(entry)
+
+# Resident memory plateaus regardless of total volume.
+s = chain.stats()
+assert s["resident_entries"] <= 10_000     # the window, not the total
+
+# Verify the whole chain: on-disk file bytes + the in-memory tail.
+disk = open("audit.jsonl", "rb").read()
+tail = chain.export_tail_jsonl()
+SignedAuditChain.verify_jsonl(disk + tail, kp.public_keys())
+```
+
+Eviction is transactional: entries are pruned from memory only after the file write is fsynced, so a write failure never loses data. For manual control (your own S3/DB sink, custom flush cadence) the base chain exposes the primitives directly: `prune_before(index)` after you persist `[0, index)`, `entries_since_jsonl(index)`, `base_index`, and `anchor_hash`. Verify a chain split across several files with `SignedAuditChain.verify_jsonl_segments([seg1, seg2, ...], kp.public_keys())`.
+
 ---
 
 ## Secure channel (bytes flow)

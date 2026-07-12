@@ -169,6 +169,25 @@ blob = chain.export_jsonl()
 SignedAuditChain.verify_jsonl(blob, kp.public_keys())
 ```
 
+**Bounded memory for long-running services.** A plain `SignedAuditChain` keeps every entry in RAM, so a service that appends forever grows without bound. `ManagedAuditChain` streams old entries to a JSONL file and prunes them from memory under a retention policy you configure by entry count, by bytes, on a timer, or any combination. The full chain still verifies across the on-disk file plus the in-memory tail.
+
+```python
+from kavach import ManagedAuditChain, SignedAuditChain
+
+chain = ManagedAuditChain(
+    kp, "audit.jsonl",
+    max_entries=10_000,          # evict when the window exceeds 10k entries
+    max_bytes=64 * 1024 * 1024,  # ...or 64 MB, whichever first
+    flush_interval_secs=1.0,     # ...or once per second, even below the sizes
+    on_sink_failure="reject",    # back-pressure if the disk is unavailable
+)
+for entry in stream():           # append forever; resident memory plateaus
+    chain.append(entry)
+
+disk = open("audit.jsonl", "rb").read()
+SignedAuditChain.verify_jsonl(disk + chain.export_tail_jsonl(), kp.public_keys())
+```
+
 ### Secure channel
 
 Hybrid-encrypted, PQ-signed byte channel between two peers. Sealed payloads are opaque; ship them over any transport.

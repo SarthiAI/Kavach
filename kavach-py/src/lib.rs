@@ -30,6 +30,10 @@ use kavach_core::{
 };
 use kavach_pq::{
     audit::{self as pq_audit, SignedAuditChain as SignedAuditChainInner},
+    audit_sink::{
+        FileAuditSink as FileAuditSinkInner, ManagedAuditChain as ManagedAuditChainInner,
+        RetentionPolicy as RetentionPolicyInner, SinkFailurePolicy as SinkFailurePolicyInner,
+    },
     directory::{
         FilePublicKeyDirectory as FilePublicKeyDirectoryInner,
         InMemoryPublicKeyDirectory as InMemoryPublicKeyDirectoryInner,
@@ -1484,6 +1488,258 @@ impl SignedAuditChain {
             .map_err(|e| PyValueError::new_err(format!("audit chain verification failed: {e}")))?;
         Ok(entries.len())
     }
+
+    // ── Bounded-memory primitives ────────────────────────────────
+
+    /// Logical index of the oldest entry still held in memory (0 until the
+    /// first `prune_before`).
+    #[getter]
+    fn base_index(&self) -> u64 {
+        self.inner.base_index()
+    }
+
+    /// Number of entries currently held in memory (`length - base_index`).
+    #[getter]
+    fn resident_entries(&self) -> u64 {
+        self.inner.resident_entries()
+    }
+
+    /// The `previous_hash` the oldest retained entry chains from. Anchor for
+    /// verifying the in-memory tail in isolation via `verify_jsonl_segments`.
+    #[getter]
+    fn anchor_hash(&self) -> String {
+        self.inner.anchor_hash()
+    }
+
+    /// Drop in-memory entries with logical index `< before`, returning the
+    /// number dropped. The head hash and length are unchanged, so appending
+    /// continues the same chain. You MUST have durably persisted entries
+    /// `[0, before)` first, there is no way to recover them afterwards.
+    fn prune_before(&self, before: u64) -> u64 {
+        self.inner.prune_before(before)
+    }
+
+    /// Export the retained entries with logical index `>= from` as JSONL
+    /// bytes. Raises if `from` is below `base_index` (already evicted).
+    fn entries_since_jsonl<'py>(&self, py: Python<'py>, from: u64) -> PyResult<Bound<'py, PyBytes>> {
+        let entries = self
+            .inner
+            .entries_since(from)
+            .map_err(|e| PyValueError::new_err(format!("entries_since failed: {e}")))?;
+        let buf = pq_audit::export_jsonl(&entries)
+            .map_err(|err| PyRuntimeError::new_err(format!("export: {err}")))?;
+        Ok(PyBytes::new_bound(py, &buf))
+    }
+
+    /// Verify a chain split across ordered JSONL segments (several on-disk
+    /// files, optionally followed by the in-memory tail), stitching them into
+    /// one logical chain from genesis. Returns the total number of entries
+    /// verified. Raises on any tamper, gap, reorder, splice, or mode mismatch.
+    #[staticmethod]
+    #[pyo3(signature = (segments, public_keys, hybrid=None))]
+    fn verify_jsonl_segments(
+        segments: Vec<Vec<u8>>,
+        public_keys: &PublicKeyBundle,
+        hybrid: Option<bool>,
+    ) -> PyResult<usize> {
+        let parsed: Vec<Vec<pq_audit::SignedAuditEntry>> = segments
+            .iter()
+            .map(|s| pq_audit::parse_jsonl(s))
+            .collect::<Result<_, _>>()
+            .map_err(|e| PyValueError::new_err(format!("audit chain parse failed: {e}")))?;
+        // Infer mode from the first non-empty segment; strict if hybrid given.
+        let mut detected: Option<pq_audit::ChainMode> = None;
+        for seg in &parsed {
+            if let Some(m) = pq_audit::detect_mode(seg)
+                .map_err(|e| PyValueError::new_err(format!("audit chain parse failed: {e}")))?
+            {
+                detected = Some(m);
+                break;
+            }
+        }
+        let effective = match (hybrid, detected) {
+            (Some(expected), Some(cm)) if expected != cm.is_hybrid() => {
+                return Err(PyValueError::new_err(format!(
+                    "audit chain mode mismatch: caller expected hybrid={expected} but chain is {cm}"
+                )));
+            }
+            (Some(expected), _) => expected,
+            (None, Some(cm)) => cm.is_hybrid(),
+            (None, None) => return Ok(0),
+        };
+        let verifier = PqVerifier::from_bundle(&public_keys.inner, effective);
+        let refs: Vec<&[pq_audit::SignedAuditEntry]> = parsed.iter().map(|v| v.as_slice()).collect();
+        pq_audit::verify_segments(&refs, &verifier)
+            .map_err(|e| PyValueError::new_err(format!("audit chain verification failed: {e}")))?;
+        Ok(parsed.iter().map(|v| v.len()).sum())
+    }
+}
+
+/// A `SignedAuditChain` that keeps resident memory bounded by durably evicting
+/// old entries to a JSONL file, under a configurable retention policy.
+///
+/// Append as usual; a background worker moves old entries to disk and prunes
+/// them from memory when any configured trigger fires:
+///
+/// - `max_entries`: evict when the in-memory window exceeds this many entries.
+/// - `max_bytes`: evict when estimated in-memory bytes exceed this.
+/// - `flush_interval_secs`: evict on a timer even below the size thresholds.
+///
+/// Any combination can be set at once. Eviction is transactional: entries are
+/// pruned only after the file write is fsynced, so a write failure never loses
+/// data. `on_sink_failure` (`"buffer"` or `"reject"`) chooses how backpressure
+/// is applied when the disk is unavailable.
+///
+/// Verify the full chain by concatenating the on-disk file bytes with
+/// `export_tail_jsonl()` and passing them to `SignedAuditChain.verify_jsonl`.
+#[pyclass]
+struct ManagedAuditChain {
+    inner: ManagedAuditChainInner,
+    is_hybrid: bool,
+}
+
+#[pymethods]
+impl ManagedAuditChain {
+    #[new]
+    #[pyo3(signature = (
+        keypair,
+        sink_path,
+        hybrid=true,
+        max_entries=None,
+        max_bytes=None,
+        flush_interval_secs=None,
+        min_retained=256,
+        on_sink_failure="buffer".to_string(),
+        buffer_ceiling=1_000_000,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        keypair: &KavachKeyPair,
+        sink_path: String,
+        hybrid: bool,
+        max_entries: Option<u64>,
+        max_bytes: Option<u64>,
+        flush_interval_secs: Option<f64>,
+        min_retained: u64,
+        on_sink_failure: String,
+        buffer_ceiling: u64,
+    ) -> PyResult<Self> {
+        let on_failure = match on_sink_failure.as_str() {
+            "buffer" => SinkFailurePolicyInner::Buffer { buffer_ceiling },
+            "reject" => SinkFailurePolicyInner::RejectAppends,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "on_sink_failure must be 'buffer' or 'reject', got '{other}'"
+                )));
+            }
+        };
+        let flush_interval = flush_interval_secs.map(std::time::Duration::from_secs_f64);
+        let policy = RetentionPolicyInner {
+            max_entries,
+            max_bytes,
+            flush_interval,
+            min_retained,
+            on_sink_failure: on_failure,
+        };
+        let signer = PqSigner::from_keypair(&keypair.inner, hybrid);
+        let sink = Arc::new(FileAuditSinkInner::new(&sink_path));
+        Ok(Self {
+            inner: ManagedAuditChainInner::new(signer, sink, policy),
+            is_hybrid: hybrid,
+        })
+    }
+
+    /// Append an audit entry. Returns the new total chain length. Raises if
+    /// backpressure rejects the append (sink unavailable and buffer full).
+    fn append(&self, entry: &AuditEntry) -> PyResult<u64> {
+        self.inner
+            .append(&entry.inner)
+            .map_err(|e| PyRuntimeError::new_err(format!("append failed: {e}")))?;
+        Ok(self.inner.len())
+    }
+
+    /// Force one flush-then-prune cycle now; returns the number of entries
+    /// evicted to disk.
+    fn flush(&self) -> PyResult<u64> {
+        self.inner
+            .flush()
+            .map_err(|e| PyRuntimeError::new_err(format!("flush failed: {e}")))
+    }
+
+    /// Flush everything (ignores `min_retained`); returns entries evicted.
+    fn drain(&self) -> PyResult<u64> {
+        self.inner
+            .drain()
+            .map_err(|e| PyRuntimeError::new_err(format!("drain failed: {e}")))
+    }
+
+    /// Export the in-memory tail as JSONL bytes. Concatenate the on-disk file
+    /// bytes before these to reconstruct the full chain for verification.
+    fn export_tail_jsonl<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let buf = self
+            .inner
+            .export_tail_jsonl()
+            .map_err(|err| PyRuntimeError::new_err(format!("export: {err}")))?;
+        Ok(PyBytes::new_bound(py, &buf))
+    }
+
+    #[getter]
+    fn length(&self) -> u64 {
+        self.inner.len()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len() as usize
+    }
+
+    #[getter]
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    #[getter]
+    fn head_hash(&self) -> String {
+        self.inner.head_hash()
+    }
+
+    #[getter]
+    fn base_index(&self) -> u64 {
+        self.inner.base_index()
+    }
+
+    #[getter]
+    fn resident_entries(&self) -> u64 {
+        self.inner.resident_entries()
+    }
+
+    #[getter]
+    fn resident_bytes(&self) -> u64 {
+        self.inner.resident_bytes()
+    }
+
+    #[getter]
+    fn anchor_hash(&self) -> String {
+        self.inner.anchor_hash()
+    }
+
+    #[getter]
+    fn is_hybrid(&self) -> bool {
+        self.is_hybrid
+    }
+
+    /// A snapshot of the chain's counters as a dict.
+    fn stats<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let s = self.inner.stats();
+        let d = pyo3::types::PyDict::new_bound(py);
+        d.set_item("entries_appended", s.entries_appended)?;
+        d.set_item("entries_evicted", s.entries_evicted)?;
+        d.set_item("resident_entries", s.resident_entries)?;
+        d.set_item("resident_bytes", s.resident_bytes)?;
+        d.set_item("sink_failures", s.sink_failures)?;
+        d.set_item("sink_healthy", s.sink_healthy)?;
+        d.set_item("last_flush_index", s.last_flush_index)?;
+        Ok(d)
+    }
 }
 
 // ─── Secure channel ──────────────────────────────────────────────
@@ -2352,6 +2608,7 @@ fn _kavach_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PublicKeyBundle>()?;
     m.add_class::<AuditEntry>()?;
     m.add_class::<SignedAuditChain>()?;
+    m.add_class::<ManagedAuditChain>()?;
     m.add_class::<SecureChannel>()?;
     m.add_class::<PublicKeyDirectory>()?;
     m.add_class::<DirectoryTokenVerifier>()?;

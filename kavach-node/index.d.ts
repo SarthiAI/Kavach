@@ -151,6 +151,33 @@ export interface AuditEntryOptions {
   evaluationId?: string
   sessionId?: string
 }
+/** Options for `ManagedAuditChain`. */
+export interface ManagedAuditOptions {
+  /** ML-DSA + Ed25519 (default true) vs ML-DSA only. */
+  hybrid?: boolean
+  /** Evict when the in-memory window exceeds this many entries. */
+  maxEntries?: number
+  /** Evict when estimated in-memory bytes exceed this. */
+  maxBytes?: number
+  /** Evict on this interval (milliseconds) even below the size thresholds. */
+  flushIntervalMs?: number
+  /** Always keep at least this many most-recent entries in memory (default 256). */
+  minRetained?: number
+  /** Backpressure when the sink is down: `"buffer"` (default) or `"reject"`. */
+  onSinkFailure?: string
+  /** Hard ceiling for the buffer policy before `append` errors (default 1e6). */
+  bufferCeiling?: number
+}
+/** A snapshot of a `ManagedAuditChain`'s counters. */
+export interface ManagedAuditStats {
+  entriesAppended: number
+  entriesEvicted: number
+  residentEntries: number
+  residentBytes: number
+  sinkFailures: number
+  sinkHealthy: boolean
+  lastFlushIndex: number
+}
 /**
  * JS-visible view of a [`core::InvalidationScope`]. Passed as the
  * sole argument to the callback registered via
@@ -318,6 +345,73 @@ export declare class SignedAuditChain {
    * Throws on tamper / signature mismatch / chain break / mode mismatch.
    */
   static verifyJsonl(data: Buffer, publicKeys: PublicKeyBundleView, hybrid?: boolean | undefined | null): number
+  /** Logical index of the oldest entry still held in memory. */
+  get baseIndex(): number
+  /** Number of entries currently held in memory (`length - baseIndex`). */
+  get residentEntries(): number
+  /**
+   * The `previous_hash` the oldest retained entry chains from (anchor for
+   * verifying the in-memory tail in isolation).
+   */
+  get anchorHash(): string
+  /**
+   * Drop in-memory entries with logical index `< before`; returns the number
+   * dropped. Head hash and length are unchanged. You MUST have durably
+   * persisted entries `[0, before)` first.
+   */
+  pruneBefore(before: number): number
+  /**
+   * Export retained entries with logical index `>= from` as JSONL bytes.
+   * Throws if `from` is below `baseIndex` (already evicted).
+   */
+  entriesSinceJsonl(from: number): Buffer
+  /**
+   * Verify a chain split across ordered JSONL segments (several on-disk
+   * files, optionally followed by the in-memory tail), stitched into one
+   * logical chain from genesis. Returns total entries verified. Throws on any
+   * tamper, gap, reorder, splice, or mode mismatch.
+   */
+  static verifyJsonlSegments(segments: Array<Buffer>, publicKeys: PublicKeyBundleView, hybrid?: boolean | undefined | null): number
+}
+/**
+ * A `SignedAuditChain` that keeps resident memory bounded by durably evicting
+ * old entries to a JSONL file under a configurable retention policy.
+ *
+ * Append as usual; a background worker moves old entries to disk and prunes
+ * them from memory when any configured trigger fires (`maxEntries`,
+ * `maxBytes`, or `flushIntervalMs`, in any combination). Eviction is
+ * transactional: entries are pruned only after the file write is fsynced, so a
+ * write failure never loses data. Verify the full chain by concatenating the
+ * on-disk file bytes with `exportTailJsonl()` and passing them to
+ * `SignedAuditChain.verifyJsonl`.
+ */
+export declare class ManagedAuditChain {
+  /** Construct a managed chain writing to a JSONL file at `sinkPath`. */
+  constructor(keypair: KavachKeyPair, sinkPath: string, options?: ManagedAuditOptions | undefined | null)
+  /**
+   * Append an entry. Returns the new total length. Throws if backpressure
+   * rejects the append (sink unavailable and buffer full).
+   */
+  append(entry: AuditEntry): number
+  /** Force one flush-then-prune cycle now; returns entries evicted to disk. */
+  flush(): number
+  /** Flush everything (ignores `minRetained`); returns entries evicted. */
+  drain(): number
+  /**
+   * Export the in-memory tail as JSONL bytes. Concatenate the on-disk file
+   * bytes before these to reconstruct the full chain for verification.
+   */
+  exportTailJsonl(): Buffer
+  get length(): number
+  get isEmpty(): boolean
+  get headHash(): string
+  get baseIndex(): number
+  get residentEntries(): number
+  get residentBytes(): number
+  get anchorHash(): string
+  get isHybrid(): boolean
+  /** A snapshot of the chain's counters. */
+  stats(): ManagedAuditStats
 }
 export declare class KavachGate {
   /**

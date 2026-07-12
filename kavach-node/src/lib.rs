@@ -16,6 +16,10 @@ use kavach_core::{
 };
 use kavach_pq::{
     audit::{self as pq_audit, SignedAuditChain as SignedAuditChainInner},
+    audit_sink::{
+        FileAuditSink as FileAuditSinkInner, ManagedAuditChain as ManagedAuditChainInner,
+        RetentionPolicy as RetentionPolicyInner, SinkFailurePolicy as SinkFailurePolicyInner,
+    },
     directory::{
         FilePublicKeyDirectory as FilePublicKeyDirectoryInner,
         InMemoryPublicKeyDirectory as InMemoryPublicKeyDirectoryInner,
@@ -777,6 +781,280 @@ impl SignedAuditChain {
         pq_audit::verify_chain(&entries, &verifier)
             .map_err(|e| Error::from_reason(format!("audit chain verification failed: {e}")))?;
         Ok(entries.len() as u32)
+    }
+
+    // ── Bounded-memory primitives ────────────────────────────────
+
+    /// Logical index of the oldest entry still held in memory.
+    #[napi(getter)]
+    pub fn base_index(&self) -> i64 {
+        self.inner.base_index() as i64
+    }
+
+    /// Number of entries currently held in memory (`length - baseIndex`).
+    #[napi(getter)]
+    pub fn resident_entries(&self) -> i64 {
+        self.inner.resident_entries() as i64
+    }
+
+    /// The `previous_hash` the oldest retained entry chains from (anchor for
+    /// verifying the in-memory tail in isolation).
+    #[napi(getter)]
+    pub fn anchor_hash(&self) -> String {
+        self.inner.anchor_hash()
+    }
+
+    /// Drop in-memory entries with logical index `< before`; returns the number
+    /// dropped. Head hash and length are unchanged. You MUST have durably
+    /// persisted entries `[0, before)` first.
+    #[napi]
+    pub fn prune_before(&self, before: i64) -> i64 {
+        self.inner.prune_before(before.max(0) as u64) as i64
+    }
+
+    /// Export retained entries with logical index `>= from` as JSONL bytes.
+    /// Throws if `from` is below `baseIndex` (already evicted).
+    #[napi]
+    pub fn entries_since_jsonl(&self, from: i64) -> Result<Buffer> {
+        let entries = self
+            .inner
+            .entries_since(from.max(0) as u64)
+            .map_err(|e| Error::from_reason(format!("entriesSince failed: {e}")))?;
+        let buf = pq_audit::export_jsonl(&entries)
+            .map_err(|err| Error::from_reason(format!("export: {err}")))?;
+        Ok(Buffer::from(buf))
+    }
+
+    /// Verify a chain split across ordered JSONL segments (several on-disk
+    /// files, optionally followed by the in-memory tail), stitched into one
+    /// logical chain from genesis. Returns total entries verified. Throws on any
+    /// tamper, gap, reorder, splice, or mode mismatch.
+    #[napi]
+    pub fn verify_jsonl_segments(
+        segments: Vec<Buffer>,
+        public_keys: PublicKeyBundleView,
+        hybrid: Option<bool>,
+    ) -> Result<u32> {
+        let parsed: Vec<Vec<pq_audit::SignedAuditEntry>> = segments
+            .iter()
+            .map(|s| pq_audit::parse_jsonl(s.as_ref()))
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| Error::from_reason(format!("audit chain parse failed: {e}")))?;
+        let mut detected: Option<pq_audit::ChainMode> = None;
+        for seg in &parsed {
+            if let Some(m) = pq_audit::detect_mode(seg)
+                .map_err(|e| Error::from_reason(format!("audit chain parse failed: {e}")))?
+            {
+                detected = Some(m);
+                break;
+            }
+        }
+        let effective = match (hybrid, detected) {
+            (Some(expected), Some(cm)) if expected != cm.is_hybrid() => {
+                return Err(Error::from_reason(format!(
+                    "audit chain mode mismatch: caller expected hybrid={expected} but chain is {cm}"
+                )));
+            }
+            (Some(expected), _) => expected,
+            (None, Some(cm)) => cm.is_hybrid(),
+            (None, None) => return Ok(0),
+        };
+        let bundle = bundle_view_to_inner(&public_keys);
+        let verifier = PqVerifier::from_bundle(&bundle, effective);
+        let refs: Vec<&[pq_audit::SignedAuditEntry]> =
+            parsed.iter().map(|v| v.as_slice()).collect();
+        pq_audit::verify_segments(&refs, &verifier)
+            .map_err(|e| Error::from_reason(format!("audit chain verification failed: {e}")))?;
+        Ok(parsed.iter().map(|v| v.len()).sum::<usize>() as u32)
+    }
+}
+
+/// Options for `ManagedAuditChain`.
+#[napi(object)]
+pub struct ManagedAuditOptions {
+    /// ML-DSA + Ed25519 (default true) vs ML-DSA only.
+    pub hybrid: Option<bool>,
+    /// Evict when the in-memory window exceeds this many entries.
+    pub max_entries: Option<i64>,
+    /// Evict when estimated in-memory bytes exceed this.
+    pub max_bytes: Option<i64>,
+    /// Evict on this interval (milliseconds) even below the size thresholds.
+    pub flush_interval_ms: Option<f64>,
+    /// Always keep at least this many most-recent entries in memory (default 256).
+    pub min_retained: Option<i64>,
+    /// Backpressure when the sink is down: `"buffer"` (default) or `"reject"`.
+    pub on_sink_failure: Option<String>,
+    /// Hard ceiling for the buffer policy before `append` errors (default 1e6).
+    pub buffer_ceiling: Option<i64>,
+}
+
+/// A snapshot of a `ManagedAuditChain`'s counters.
+#[napi(object)]
+pub struct ManagedAuditStats {
+    pub entries_appended: i64,
+    pub entries_evicted: i64,
+    pub resident_entries: i64,
+    pub resident_bytes: i64,
+    pub sink_failures: i64,
+    pub sink_healthy: bool,
+    pub last_flush_index: i64,
+}
+
+/// A `SignedAuditChain` that keeps resident memory bounded by durably evicting
+/// old entries to a JSONL file under a configurable retention policy.
+///
+/// Append as usual; a background worker moves old entries to disk and prunes
+/// them from memory when any configured trigger fires (`maxEntries`,
+/// `maxBytes`, or `flushIntervalMs`, in any combination). Eviction is
+/// transactional: entries are pruned only after the file write is fsynced, so a
+/// write failure never loses data. Verify the full chain by concatenating the
+/// on-disk file bytes with `exportTailJsonl()` and passing them to
+/// `SignedAuditChain.verifyJsonl`.
+#[napi]
+pub struct ManagedAuditChain {
+    inner: ManagedAuditChainInner,
+    is_hybrid: bool,
+}
+
+#[napi]
+impl ManagedAuditChain {
+    /// Construct a managed chain writing to a JSONL file at `sinkPath`.
+    #[napi(constructor)]
+    pub fn new(
+        keypair: &KavachKeyPair,
+        sink_path: String,
+        options: Option<ManagedAuditOptions>,
+    ) -> Result<Self> {
+        let opts = options.unwrap_or(ManagedAuditOptions {
+            hybrid: None,
+            max_entries: None,
+            max_bytes: None,
+            flush_interval_ms: None,
+            min_retained: None,
+            on_sink_failure: None,
+            buffer_ceiling: None,
+        });
+        let hybrid = opts.hybrid.unwrap_or(true);
+        let on_failure = match opts.on_sink_failure.as_deref() {
+            None | Some("buffer") => SinkFailurePolicyInner::Buffer {
+                buffer_ceiling: opts.buffer_ceiling.map(|v| v.max(0) as u64).unwrap_or(1_000_000),
+            },
+            Some("reject") => SinkFailurePolicyInner::RejectAppends,
+            Some(other) => {
+                return Err(Error::from_reason(format!(
+                    "onSinkFailure must be 'buffer' or 'reject', got '{other}'"
+                )));
+            }
+        };
+        let policy = RetentionPolicyInner {
+            max_entries: opts.max_entries.map(|v| v.max(0) as u64),
+            max_bytes: opts.max_bytes.map(|v| v.max(0) as u64),
+            flush_interval: opts
+                .flush_interval_ms
+                .map(|ms| std::time::Duration::from_secs_f64(ms / 1000.0)),
+            min_retained: opts.min_retained.map(|v| v.max(0) as u64).unwrap_or(256),
+            on_sink_failure: on_failure,
+        };
+        let signer = PqSigner::from_keypair(&keypair.inner, hybrid);
+        let sink = Arc::new(FileAuditSinkInner::new(&sink_path));
+        Ok(Self {
+            inner: ManagedAuditChainInner::new(signer, sink, policy),
+            is_hybrid: hybrid,
+        })
+    }
+
+    /// Append an entry. Returns the new total length. Throws if backpressure
+    /// rejects the append (sink unavailable and buffer full).
+    #[napi]
+    pub fn append(&self, entry: &AuditEntry) -> Result<i64> {
+        self.inner
+            .append(&entry.inner)
+            .map_err(|e| Error::from_reason(format!("append failed: {e}")))?;
+        Ok(self.inner.len() as i64)
+    }
+
+    /// Force one flush-then-prune cycle now; returns entries evicted to disk.
+    #[napi]
+    pub fn flush(&self) -> Result<i64> {
+        self.inner
+            .flush()
+            .map(|n| n as i64)
+            .map_err(|e| Error::from_reason(format!("flush failed: {e}")))
+    }
+
+    /// Flush everything (ignores `minRetained`); returns entries evicted.
+    #[napi]
+    pub fn drain(&self) -> Result<i64> {
+        self.inner
+            .drain()
+            .map(|n| n as i64)
+            .map_err(|e| Error::from_reason(format!("drain failed: {e}")))
+    }
+
+    /// Export the in-memory tail as JSONL bytes. Concatenate the on-disk file
+    /// bytes before these to reconstruct the full chain for verification.
+    #[napi]
+    pub fn export_tail_jsonl(&self) -> Result<Buffer> {
+        let buf = self
+            .inner
+            .export_tail_jsonl()
+            .map_err(|err| Error::from_reason(format!("export: {err}")))?;
+        Ok(Buffer::from(buf))
+    }
+
+    #[napi(getter)]
+    pub fn length(&self) -> i64 {
+        self.inner.len() as i64
+    }
+
+    #[napi(getter)]
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    #[napi(getter)]
+    pub fn head_hash(&self) -> String {
+        self.inner.head_hash()
+    }
+
+    #[napi(getter)]
+    pub fn base_index(&self) -> i64 {
+        self.inner.base_index() as i64
+    }
+
+    #[napi(getter)]
+    pub fn resident_entries(&self) -> i64 {
+        self.inner.resident_entries() as i64
+    }
+
+    #[napi(getter)]
+    pub fn resident_bytes(&self) -> i64 {
+        self.inner.resident_bytes() as i64
+    }
+
+    #[napi(getter)]
+    pub fn anchor_hash(&self) -> String {
+        self.inner.anchor_hash()
+    }
+
+    #[napi(getter)]
+    pub fn is_hybrid(&self) -> bool {
+        self.is_hybrid
+    }
+
+    /// A snapshot of the chain's counters.
+    #[napi]
+    pub fn stats(&self) -> ManagedAuditStats {
+        let s = self.inner.stats();
+        ManagedAuditStats {
+            entries_appended: s.entries_appended as i64,
+            entries_evicted: s.entries_evicted as i64,
+            resident_entries: s.resident_entries as i64,
+            resident_bytes: s.resident_bytes as i64,
+            sink_failures: s.sink_failures as i64,
+            sink_healthy: s.sink_healthy,
+            last_flush_index: s.last_flush_index as i64,
+        }
     }
 }
 

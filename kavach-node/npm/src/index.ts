@@ -30,6 +30,7 @@ import {
   InvalidationListenerHandle,
   KavachGate,
   KavachKeyPair,
+  ManagedAuditChain,
   PqTokenSigner,
   PublicKeyDirectory,
   SecureChannel,
@@ -37,6 +38,8 @@ import {
   spawnInvalidationListener as spawnInvalidationListenerRaw,
   type ActionContextInput,
   type AuditEntryOptions,
+  type ManagedAuditOptions,
+  type ManagedAuditStats,
   type DeviceFingerprintInput,
   type GeoLocationInput,
   type InvalidationScopeView,
@@ -151,6 +154,7 @@ export {
   KavachKeyPair,
   AuditEntry,
   SignedAuditChain,
+  ManagedAuditChain,
   SecureChannel,
   PublicKeyDirectory,
   DirectoryTokenVerifier,
@@ -159,6 +163,8 @@ export {
 };
 export type {
   AuditEntryOptions,
+  ManagedAuditOptions,
+  ManagedAuditStats,
   DeviceFingerprintInput,
   GeoLocationInput,
   InvalidationScopeView,

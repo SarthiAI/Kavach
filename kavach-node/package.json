@@ -1,6 +1,6 @@
 {
   "name": "kavach-engine",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Compiled Rust engine for Kavach, a native Node.js addon exposing the gate evaluator via napi-rs.",
   "main": "index.js",
   "types": "index.d.ts",

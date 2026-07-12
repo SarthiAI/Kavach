@@ -14,6 +14,13 @@ harness:
   checks across `Kavach/kavach-node/npm/tests/smoke_test.ts`, covering the
   same API surface as the Python SDK.
 
+Bounded-memory audit (`ManagedAuditChain`) landed for both SDKs: a
+long-running service can cap the in-memory audit window by entry count, by
+bytes, and/or on a timer, streaming older entries to a JSONL file while the
+full chain still verifies end to end. Covered by `business-tests/`
+tier 7 (Python) and the Node smoke test. See the "Bounded memory for
+long-running services" sections of the guides.
+
 The Rust crates `kavach-core` and `kavach-pq` sit underneath both SDKs and
 have extensive Rust-level test coverage (166 tests enforced with
 `RUSTFLAGS="-D warnings"` in CI). The Rust crates are production-quality as

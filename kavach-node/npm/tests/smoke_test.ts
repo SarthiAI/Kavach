@@ -25,6 +25,7 @@ import {
   KavachInvalidated,
   KavachKeyPair,
   KavachRefused,
+  ManagedAuditChain,
   McpKavachMiddleware,
   PqTokenSigner,
   PublicKeyDirectory,
@@ -35,7 +36,7 @@ import {
   type PermitTokenInput,
 } from '../src/index';
 import { randomUUID } from 'crypto';
-import { writeFileSync, unlinkSync, mkdtempSync } from 'fs';
+import { writeFileSync, readFileSync, unlinkSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -634,6 +635,109 @@ try {
   console.error('empty chain.verify threw:', e);
 }
 check('empty chain verifies', emptyOk);
+
+// ─── 12b. ManagedAuditChain, bounded memory + full-chain verify ──────
+
+section('[12b] ManagedAuditChain bounded memory + primitives');
+
+const mgrDir = mkdtempSync(join(tmpdir(), 'kavach-mgr-'));
+const mgrSink = join(mgrDir, 'audit.jsonl');
+const mgrKp = KavachKeyPair.generate();
+const mgrBundle = mgrKp.publicKeys();
+
+const managed = new ManagedAuditChain(mgrKp, mgrSink, {
+  hybrid: true,
+  maxEntries: 50,
+  maxBytes: 1_000_000,
+  minRetained: 5,
+  onSinkFailure: 'buffer',
+});
+
+const MGR_TOTAL = 600;
+for (let i = 0; i < MGR_TOTAL; i++) {
+  managed.append(AuditEntry.new(`svc-${i % 10}`, 'charge', 'permit', `tok-${i}`));
+}
+// Bring the window to the floor deterministically.
+managed.flush();
+
+check('managed length tracks all appends', managed.length === MGR_TOTAL, `len=${managed.length}`);
+check(
+  'managed window bounded (<= maxEntries)',
+  managed.residentEntries <= 50,
+  `resident=${managed.residentEntries}`
+);
+check(
+  'window plateaued far below total (memory does not track volume)',
+  managed.residentEntries < MGR_TOTAL / 10
+);
+check('managed baseIndex advanced', managed.baseIndex > 0, `base=${managed.baseIndex}`);
+const mgrStats = managed.stats();
+check(
+  'managed evicted the bulk to disk',
+  mgrStats.entriesEvicted >= MGR_TOTAL - 50,
+  `evicted=${mgrStats.entriesEvicted}`
+);
+check('managed sink healthy', mgrStats.sinkHealthy === true);
+
+// Full chain = on-disk file bytes + in-memory tail.
+const mgrDisk = readFileSync(mgrSink);
+const mgrTail = managed.exportTailJsonl();
+const mgrFull = Buffer.concat([mgrDisk, mgrTail]);
+const mgrVerified = SignedAuditChain.verifyJsonl(mgrFull, mgrBundle, true);
+check('full chain (disk + tail) verifies', mgrVerified === MGR_TOTAL, `verified=${mgrVerified}`);
+
+// Tamper in an evicted (on-disk) entry is still caught.
+const mgrTampered = Buffer.from(mgrFull);
+mgrTampered[Math.floor(mgrDisk.length / 2)] ^= 0x01;
+let mgrTamperRejected = false;
+try {
+  SignedAuditChain.verifyJsonl(mgrTampered, mgrBundle, true);
+} catch {
+  mgrTamperRejected = true;
+}
+check('tampered on-disk entry rejected', mgrTamperRejected);
+
+// Layer-1 primitives on the base chain: prune + entries_since + anchor.
+const primChain = new SignedAuditChain(mgrKp, true);
+for (let i = 0; i < 10; i++) primChain.append(AuditEntry.new('p', 'x', 'permit', `t-${i}`));
+const primDropped = primChain.pruneBefore(6);
+check('pruneBefore(6) drops 6', primDropped === 6);
+check('baseIndex is 6 after prune', primChain.baseIndex === 6);
+check('length unchanged by prune', primChain.length === 10);
+check('resident is 4 after prune', primChain.residentEntries === 4);
+check('anchorHash advanced past genesis', primChain.anchorHash !== 'genesis' && primChain.anchorHash.length === 64);
+const primTail = primChain.entriesSinceJsonl(6);
+check('entriesSinceJsonl returns the tail', Buffer.isBuffer(primTail) && primTail.length > 0);
+const primTailLines = (primTail.toString('utf-8').match(/\n/g) || []).length;
+check('tail has 4 entries', primTailLines === 4);
+
+// Segment verification across two on-disk files + tail.
+const segChain = new SignedAuditChain(mgrKp, true);
+for (let i = 0; i < 12; i++) segChain.append(AuditEntry.new('s', 'y', 'permit', `u-${i}`));
+const segA = segChain.entriesSinceJsonl(0); // [0,12) full, we slice logically below
+// Build two segments by pruning progressively.
+const segFull = segChain.exportJsonl();
+const segLines = segFull.toString('utf-8').split('\n').filter((l) => l.length > 0);
+const seg1 = Buffer.from(segLines.slice(0, 5).join('\n') + '\n');
+const seg2 = Buffer.from(segLines.slice(5, 9).join('\n') + '\n');
+const seg3 = Buffer.from(segLines.slice(9, 12).join('\n') + '\n');
+const segVerified = SignedAuditChain.verifyJsonlSegments([seg1, seg2, seg3], mgrBundle, true);
+check('verifyJsonlSegments stitches 3 segments', segVerified === 12, `verified=${segVerified}`);
+// A gap between segments is caught.
+let segGapRejected = false;
+try {
+  SignedAuditChain.verifyJsonlSegments([seg1, seg3], mgrBundle, true);
+} catch {
+  segGapRejected = true;
+}
+check('segment gap is rejected', segGapRejected);
+void segA;
+
+try {
+  unlinkSync(mgrSink);
+} catch {
+  /* best effort */
+}
 
 // ─── 13. SecureChannel, hybrid encrypt + sign + replay + context binding ──
 

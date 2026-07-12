@@ -276,6 +276,43 @@ SignedAuditChain.verifyJsonl(blob, kp.publicKeys(), true);    // strict hybrid a
 
 Tampered blobs, wrong-key bundles, and mode mismatches (PQ-only verifier presented with a hybrid chain) all throw. Passing `false` on a hybrid blob is rejected outright: the silent-downgrade defense.
 
+### Bounded memory for long-running services
+
+`SignedAuditChain` retains every entry in memory. A service appending one entry per request, forever, grows resident memory without bound. Use `ManagedAuditChain`: it streams older entries to a JSONL file and prunes them from RAM under a retention policy, while the full chain still verifies across the on-disk file plus the in-memory tail.
+
+```typescript
+import { AuditEntry, KavachKeyPair, ManagedAuditChain, SignedAuditChain } from 'kavach-sdk';
+import { readFileSync } from 'fs';
+
+const kp = KavachKeyPair.generate();
+
+// Any combination of the three triggers; whichever fires first evicts down to
+// minRetained. onSinkFailure 'reject' back-pressures (append throws) if the disk
+// is unavailable, instead of growing until OOM.
+const chain = new ManagedAuditChain(kp, 'audit.jsonl', {
+  hybrid: true,
+  maxEntries: 10_000,
+  maxBytes: 64 * 1024 * 1024,
+  flushIntervalMs: 1000,
+  minRetained: 256,
+  onSinkFailure: 'reject',   // or 'buffer' (default) with a hard ceiling
+});
+
+for (const entry of streamOfDecisions()) {
+  chain.append(entry);            // append as usual, forever
+}
+
+const s = chain.stats();
+console.assert(s.residentEntries <= 10_000);  // the window, not the total
+
+// Verify the whole chain: on-disk file bytes + the in-memory tail.
+const disk = readFileSync('audit.jsonl');
+const tail = chain.exportTailJsonl();
+SignedAuditChain.verifyJsonl(Buffer.concat([disk, tail]), kp.publicKeys());
+```
+
+Eviction is transactional: entries are pruned from memory only after the file write is fsynced, so a write failure never loses data. For manual control the base chain exposes `pruneBefore(index)`, `entriesSinceJsonl(index)`, `baseIndex`, and `anchorHash`; verify a chain split across several files with `SignedAuditChain.verifyJsonlSegments([seg1, seg2, ...], kp.publicKeys())`.
+
 ---
 
 ## Public key directory
