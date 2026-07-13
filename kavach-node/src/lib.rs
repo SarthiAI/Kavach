@@ -349,6 +349,58 @@ impl KavachKeyPair {
             .map_err(|e| Error::from_reason(format!("serialize manifest: {e}")))?;
         Ok(Buffer::from(bytes))
     }
+
+    /// Serialize the **full keypair, including secret keys**, to bytes.
+    ///
+    /// SECURITY: the returned Buffer holds secret signing material. Seal it
+    /// (KMS/HSM, encrypted volume) before persistence and discard the reference
+    /// once written. Prefer `saveToFile`, which writes an owner-only file.
+    /// Rebuild with `KavachKeyPair.fromSecretBytes(...)`.
+    #[napi(js_name = "toSecretBytes")]
+    pub fn to_secret_bytes(&self) -> Result<Buffer> {
+        // Core zeroizes its transient encode buffer; the returned bytes move
+        // into the JS-owned Buffer, so there is no extra Rust copy to clear.
+        let bytes = self
+            .inner
+            .to_secret_bytes()
+            .map_err(|e| Error::from_reason(format!("keypair toSecretBytes: {e}")))?;
+        Ok(Buffer::from(bytes))
+    }
+
+    /// Reconstruct a keypair from bytes produced by `toSecretBytes`.
+    ///
+    /// The rebuilt keypair has the same `id`, the same `publicKeys()`, and the
+    /// same signing identity as the original.
+    #[napi(factory, js_name = "fromSecretBytes")]
+    pub fn from_secret_bytes(data: Buffer) -> Result<Self> {
+        let inner = KavachKeyPairInner::from_secret_bytes(&data)
+            .map_err(|e| Error::from_reason(format!("keypair fromSecretBytes: {e}")))?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Write the keypair to a file with owner-only permissions (0600 on Unix).
+    ///
+    /// SECURITY: this writes secret key material to disk. Treat the file as any
+    /// private key. An existing file is tightened to owner-only but never
+    /// widened. The transient in-memory buffer is zeroized after the write.
+    #[napi(js_name = "saveToFile")]
+    pub fn save_to_file(&self, path: String) -> Result<()> {
+        self.inner
+            .save_to_file(&path)
+            .map_err(|e| Error::from_reason(format!("keypair saveToFile: {e}")))
+    }
+
+    /// Load a keypair previously written by `saveToFile`.
+    #[napi(factory, js_name = "loadFromFile")]
+    pub fn load_from_file(path: String) -> Result<Self> {
+        let inner = KavachKeyPairInner::load_from_file(&path)
+            .map_err(|e| Error::from_reason(format!("keypair loadFromFile: {e}")))?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
 }
 
 /// JS-visible public-key bundle. Plain object so JS can pluck fields directly.
@@ -664,6 +716,46 @@ fn bundle_view_to_inner(view: &PublicKeyBundleView) -> PublicKeyBundleInner {
             .expires_at
             .and_then(|s| Utc.timestamp_opt(s, 0).single()),
     }
+}
+
+/// Serialize a public-key bundle to self-describing bytes (public material
+/// only). Safe to share; move to a verifier process and rebuild with
+/// `publicBundleFromBytes(...)`.
+#[napi(js_name = "publicBundleToBytes")]
+pub fn public_bundle_to_bytes(bundle: PublicKeyBundleView) -> Result<Buffer> {
+    let inner = bundle_view_to_inner(&bundle);
+    let bytes = inner
+        .to_bytes()
+        .map_err(|e| Error::from_reason(format!("publicBundleToBytes: {e}")))?;
+    Ok(Buffer::from(bytes))
+}
+
+/// Reconstruct a public-key bundle from bytes produced by
+/// `publicBundleToBytes`.
+#[napi(js_name = "publicBundleFromBytes")]
+pub fn public_bundle_from_bytes(data: Buffer) -> Result<PublicKeyBundleView> {
+    let inner = PublicKeyBundleInner::from_bytes(&data)
+        .map_err(|e| Error::from_reason(format!("publicBundleFromBytes: {e}")))?;
+    Ok(PublicKeyBundleView::from(inner))
+}
+
+/// Serialize a public-key bundle to a JSON string (public material only). This
+/// is the shape a control plane can carry inside a JSON enrollment payload;
+/// rebuild with `publicBundleFromJson(...)`.
+#[napi(js_name = "publicBundleToJson")]
+pub fn public_bundle_to_json(bundle: PublicKeyBundleView) -> Result<String> {
+    let inner = bundle_view_to_inner(&bundle);
+    serde_json::to_string(&inner)
+        .map_err(|e| Error::from_reason(format!("publicBundleToJson: {e}")))
+}
+
+/// Reconstruct a public-key bundle from a JSON string produced by
+/// `publicBundleToJson`.
+#[napi(js_name = "publicBundleFromJson")]
+pub fn public_bundle_from_json(data: String) -> Result<PublicKeyBundleView> {
+    let inner: PublicKeyBundleInner = serde_json::from_str(&data)
+        .map_err(|e| Error::from_reason(format!("publicBundleFromJson: {e}")))?;
+    Ok(PublicKeyBundleView::from(inner))
 }
 
 /// A tamper-evident PQ-signed audit log.

@@ -7,10 +7,10 @@ What Kavach supports today, and what is on the way. Version `0.1.x`.
 The two surfaces that have passed the end-to-end consumer-validation
 harness:
 
-- **`kavach-py`** (Python SDK, PyO3): exercised by 41 scenarios across
-  `business-tests/` tiers 1 to 6, covering every documented SDK surface with
+- **`kavach-py`** (Python SDK, PyO3): exercised by 45 scenarios across
+  `business-tests/` tiers 1 to 8, covering every documented SDK surface with
   several hundred assertions.
-- **`kavach-node`** (Node / TypeScript SDK, napi-rs): exercised by 221
+- **`kavach-node`** (Node / TypeScript SDK, napi-rs): exercised by 252
   checks across `Kavach/kavach-node/npm/tests/smoke_test.ts`, covering the
   same API surface as the Python SDK.
 
@@ -20,6 +20,17 @@ bytes, and/or on a timer, streaming older entries to a JSONL file while the
 full chain still verifies end to end. Covered by `business-tests/`
 tier 7 (Python) and the Node smoke test. See the "Bounded memory for
 long-running services" sections of the guides.
+
+Durable signer identity and public-bundle export landed for both SDKs.
+`KavachKeyPair` persists to an owner-only file (`save_to_file` /
+`load_from_file`, `0600` on Unix) or to sealed secret bytes
+(`to_secret_bytes` / `from_secret_bytes`), so a node reloads one stable
+`key_id` across restarts and keeps a single continuous audit chain. The
+public `PublicKeyBundle` moves between processes as JSON or self-describing
+bytes, so a central service can pin each node's bundle at enrollment and
+independently re-verify every pushed audit chain, trusting no self-reported
+flag. Covered by `business-tests/` tier 8 (Python) and both SDK smoke tests.
+See the "Persisting signer identity across restarts" sections of the guides.
 
 The Rust crates `kavach-core` and `kavach-pq` sit underneath both SDKs and
 have extensive Rust-level test coverage (166 tests enforced with
@@ -109,32 +120,6 @@ vendoring them in. The public project does not support that usage yet.
   and warm-cache survive-transient-outage. The consumer-validation harness
   does not yet cover this path end to end. Treated as experimental in the
   docs (see [concepts/key-management.md](concepts/key-management.md)).
-
-## Planned: `KavachKeyPair` byte serialization in the Python SDK
-
-The Python `KavachKeyPair` exposes no secret-byte serialization in the
-current `0.1.x` line. A keypair you generate via `KavachKeyPair.generate()`
-cannot be dumped to bytes for KMS or HSM persistence and later rehydrated
-through the SDK. Stable signer identity across process restarts therefore
-requires either regenerating per restart and redistributing the public
-bundle (the recommended pattern today) or sourcing raw ML-DSA-65 key bytes
-from a non-Kavach generator (for example, an HSM with native ML-DSA-65
-support) and feeding them to `PqTokenSigner.hybrid(...)`. The Rust side
-already supports byte access directly on `KavachKeyPair`; this is a
-binding gap, not a fundamental one.
-
-When this comes out of planned, `KavachKeyPair` will expose
-`export_secret_bytes()` and `KavachKeyPair.from_bytes(...)` (or equivalent
-named methods) so the typical pattern becomes:
-
-1. Generate once: `kp = KavachKeyPair.generate()`.
-2. Persist: `my_kms.put(kp.id, kp.export_secret_bytes())`.
-3. Rehydrate on every restart: `kp = KavachKeyPair.from_bytes(my_kms.get(kp.id))`.
-4. Build the signer: `signer = PqTokenSigner.from_keypair_hybrid(kp)`.
-
-This makes the KMS-backed pattern reachable end to end through the Python
-SDK alone, without an external ML-DSA-65 generator. The same surface will
-be added to the Node SDK for consistency.
 
 ## Planned: Rust-level consumer catalogue
 

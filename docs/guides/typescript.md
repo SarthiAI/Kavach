@@ -253,6 +253,52 @@ PqTokenSigner.fromKeypairPqOnly(kp);
 PqTokenSigner.pqOnly(Buffer.alloc(0), bundle.mlDsaVerifyingKey, kp.id);
 ```
 
+The public bundle is safe to hand to any verifier. Move it between processes with the JSON form (natural for an enrollment payload) or the self-describing byte form:
+
+```typescript
+import {
+  publicBundleToJson, publicBundleFromJson,
+  publicBundleToBytes, publicBundleFromBytes,
+  SignedAuditChain,
+} from 'kavach-sdk';
+
+// Signer side: export the public bundle.
+const enrollJson = publicBundleToJson(bundle);   // string, carries no secret
+const raw        = publicBundleToBytes(bundle);  // Buffer, version-tagged
+
+// Verifier side: reconstruct it and verify independently.
+const pinned = publicBundleFromJson(enrollJson);
+SignedAuditChain.verifyJsonl(pushedBlob, pinned); // the verifier re-checks signatures itself
+```
+
+Both round-trip exactly, so a central service can pin each node's public bundle at enrollment and re-verify every pushed audit chain on its own, trusting no self-reported "verified" flag.
+
+## Persisting signer identity across restarts
+
+A keypair regenerated on every boot gets a fresh `keyId` and a new public bundle each restart. Persist the identity once and reload the same one instead, so the node keeps one stable `keyId` and one continuous audit chain.
+
+```typescript
+import { existsSync } from 'fs';
+import { KavachKeyPair, PqTokenSigner } from 'kavach-sdk';
+
+const keyPath = '/var/lib/kavach/node-signer.key';
+
+// Generate once, then reuse the same identity forever.
+const kp = existsSync(keyPath)
+  ? KavachKeyPair.loadFromFile(keyPath)
+  : (() => {
+      const fresh = KavachKeyPair.generate();
+      fresh.saveToFile(keyPath);          // written 0600 (owner read/write only) on Unix
+      return fresh;
+    })();
+
+const signer = PqTokenSigner.fromKeypairHybrid(kp);
+```
+
+`saveToFile` creates the file `0600` and never widens an existing file's permissions. This is secret key material: treat the file as any private key. For a secrets manager instead of local disk, use `kp.toSecretBytes()` (seal it before storage) and `KavachKeyPair.fromSecretBytes(blob)` to rebuild the exact same identity. A permit or audit entry signed before a restart verifies unchanged afterward.
+
+If you would rather not persist secret material, generate a fresh keypair on every boot and redistribute the new public bundle to your verifier pool (which should accept multiple bundles and resolve by `keyId`). That is fine for single-tenant or rapid-iteration setups; for multi-verifier or regulator-facing deployments, prefer persisting the identity.
+
 ---
 
 ## Signed audit chain

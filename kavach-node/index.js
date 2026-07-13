@@ -310,11 +310,15 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { KavachKeyPair, PqTokenSigner, AuditEntry, SignedAuditChain, ManagedAuditChain, KavachGate, SecureChannel, PublicKeyDirectory, DirectoryTokenVerifier, InMemoryInvalidationBroadcaster, InvalidationListenerHandle, spawnInvalidationListener } = nativeBinding
+const { KavachKeyPair, PqTokenSigner, AuditEntry, publicBundleToBytes, publicBundleFromBytes, publicBundleToJson, publicBundleFromJson, SignedAuditChain, ManagedAuditChain, KavachGate, SecureChannel, PublicKeyDirectory, DirectoryTokenVerifier, InMemoryInvalidationBroadcaster, InvalidationListenerHandle, spawnInvalidationListener } = nativeBinding
 
 module.exports.KavachKeyPair = KavachKeyPair
 module.exports.PqTokenSigner = PqTokenSigner
 module.exports.AuditEntry = AuditEntry
+module.exports.publicBundleToBytes = publicBundleToBytes
+module.exports.publicBundleFromBytes = publicBundleFromBytes
+module.exports.publicBundleToJson = publicBundleToJson
+module.exports.publicBundleFromJson = publicBundleFromJson
 module.exports.SignedAuditChain = SignedAuditChain
 module.exports.ManagedAuditChain = ManagedAuditChain
 module.exports.KavachGate = KavachGate

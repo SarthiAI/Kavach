@@ -251,6 +251,20 @@ bundle.x25519_public_key          # 32 bytes, KEM recipient
 bundle.ml_kem_encapsulation_key   # ML-KEM-768 EK
 ```
 
+The bundle is public material, safe to hand to any verifier. Move it between processes with either the JSON form (natural for an enrollment payload) or the self-describing byte form:
+
+```python
+# On the signer side: export the public bundle.
+enroll_json = bundle.to_json()           # str, carries no secret
+raw          = bundle.to_bytes()         # bytes, version-tagged
+
+# On the verifier side: reconstruct it and verify independently.
+pinned = PublicKeyBundle.from_json(enroll_json)
+SignedAuditChain.verify_jsonl(pushed_blob, pinned)   # the verifier re-checks signatures itself
+```
+
+Both round-trip exactly, so a verifier built from a reconstructed bundle validates a chain identically to one built from the original. A central service can pin each node's public bundle at enrollment and re-verify every pushed audit chain on its own, trusting no self-reported "verified" flag.
+
 Build a signer directly from a keypair:
 
 ```python
@@ -264,11 +278,43 @@ A verifier-only signer (no signing key material) is also supported via `PqTokenS
 
 ## Persisting signer identity across restarts
 
-In the current `0.1.x` line, `KavachKeyPair` does not expose secret-byte serialization. A keypair you generate inside the Python SDK lives in process memory only; on restart, a fresh keypair has a fresh `key_id` and the public bundle changes. There are two ways to live with this:
+A keypair you generate lives in process memory. If you regenerate it on every boot, each restart produces a fresh `key_id` and a new public bundle, which forces every verifier to accept a rolling set of bundles. The fix is to persist the signing identity once and reload the same one on every start.
 
-### Pattern B (recommended today): regenerate at boot, redistribute the public bundle
+### Pattern A (recommended): persist the keypair, reload it on restart
 
-Generate a fresh keypair on every gate-process boot, attach it to the gate, and push the public bundle to your verifier pool through whatever distribution path you operate (a config service, a Kubernetes ConfigMap, a `PublicKeyDirectory` file, etc.).
+`KavachKeyPair` serializes to an owner-only file (and to raw secret bytes for a KMS or HSM shim). Load the same identity on every boot, so the node keeps one stable `key_id` and one continuous audit chain.
+
+```python
+from pathlib import Path
+
+key_path = "/var/lib/kavach/node-signer.key"
+
+# Generate once, then reuse the same identity forever.
+if Path(key_path).exists():
+    kp = KavachKeyPair.load_from_file(key_path)
+else:
+    kp = KavachKeyPair.generate()
+    kp.save_to_file(key_path)          # written 0600 (owner read/write only) on Unix
+
+signer = PqTokenSigner.from_keypair_hybrid(kp)
+gate   = Gate.from_dict(POLICY, token_signer=signer)
+```
+
+`save_to_file` creates the file `0600` and never widens an existing file's permissions. This is secret key material: treat the file as you would any private key (encrypted volume, restricted access, secure backups).
+
+If you keep keys in a secrets manager rather than on local disk, use the byte form. `to_secret_bytes()` returns the full keypair (secret keys included); seal it before storage and discard the reference once written. `from_secret_bytes(blob)` rebuilds the exact same identity.
+
+```python
+kms.put("kavach/node-signer", kp.to_secret_bytes())   # your KMS, sealed at rest
+# ... on the next boot ...
+kp = KavachKeyPair.from_secret_bytes(kms.get("kavach/node-signer"))
+```
+
+The reloaded keypair has the same `id`, the same `public_keys()`, and the same signing identity, so a permit or audit entry signed before a restart verifies unchanged afterward.
+
+### Pattern B (fallback): regenerate at boot, redistribute the public bundle
+
+If you would rather not persist secret material, generate a fresh keypair on every boot and push the new public bundle to your verifier pool through whatever distribution path you operate (a config service, a Kubernetes ConfigMap, a `PublicKeyDirectory` file).
 
 ```python
 kp     = KavachKeyPair.generate()
@@ -278,26 +324,7 @@ gate   = Gate.from_dict(POLICY, token_signer=signer)
 distribute_to_verifiers(kp.public_keys())   # your code
 ```
 
-Verifiers should accept multiple bundles in their `PublicKeyDirectory` and resolve by the `key_id` stamped on each envelope. Old bundles can be retired once permits issued under them have expired (default permit TTL is 30 seconds).
-
-This is the only pattern fully reachable through the published Python SDK on its own. It is acceptable for single-tenant deployments and any setup where verifiers refresh within seconds of a gate-process restart.
-
-### Pattern A: provision raw key bytes from your KMS / HSM
-
-The lowest-level `PqTokenSigner.hybrid(...)` constructor accepts raw bytes:
-
-```python
-signer = PqTokenSigner.hybrid(
-    ml_dsa_sk, ml_dsa_vk,
-    ed_sk, ed_vk,
-    key_id="kavach-prod-2026",
-)
-gate = Gate.from_dict(POLICY, token_signer=signer)
-```
-
-This gives stable identity across restarts, but presumes you have a non-Kavach path that emits ML-DSA-65 key material interoperable with `kavach-pq` (an HSM with native ML-DSA-65 support, for example). Do not install third-party Python PQ-crypto libraries (`pqcrypto`, `ml-dsa`, `pyca/cryptography`, etc.) to mint these bytes for use with Kavach; interoperability has not been validated and is not guaranteed.
-
-Adding `KavachKeyPair` byte serialization so Pattern A reaches stable identity through the SDK alone is tracked on the [roadmap](../roadmap.md).
+Verifiers should accept multiple bundles in their `PublicKeyDirectory` and resolve by the `key_id` stamped on each envelope. Old bundles can be retired once permits issued under them have expired (default permit TTL is 30 seconds). This is fine for single-tenant or rapid-iteration setups, but for multi-verifier or regulator-facing deployments prefer Pattern A so identity stays stable.
 
 ---
 

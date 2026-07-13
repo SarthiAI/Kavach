@@ -59,6 +59,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 // ─── Lazy Tokio runtime for async bridge ─────────────────────────
 
@@ -322,6 +323,43 @@ impl PublicKeyBundle {
         self.inner.expires_at.map(|d| d.timestamp())
     }
 
+    /// Serialize this bundle to self-describing bytes (public material only).
+    ///
+    /// Safe to share: carries only public keys. Move these bytes to a verifier
+    /// process and rebuild with `PublicKeyBundle.from_bytes(...)`.
+    fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let bytes = self
+            .inner
+            .to_bytes()
+            .map_err(|e| PyRuntimeError::new_err(format!("bundle to_bytes: {e}")))?;
+        Ok(PyBytes::new_bound(py, &bytes))
+    }
+
+    /// Reconstruct a bundle from bytes produced by `to_bytes`.
+    #[classmethod]
+    fn from_bytes(_cls: &Bound<'_, pyo3::types::PyType>, data: &[u8]) -> PyResult<Self> {
+        let inner = PublicKeyBundleInner::from_bytes(data)
+            .map_err(|e| PyValueError::new_err(format!("bundle from_bytes: {e}")))?;
+        Ok(Self { inner })
+    }
+
+    /// Serialize this bundle to a JSON string (public material only).
+    ///
+    /// This is the shape a control plane can carry inside a JSON enrollment
+    /// payload; rebuild with `PublicKeyBundle.from_json(...)`.
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner)
+            .map_err(|e| PyRuntimeError::new_err(format!("bundle to_json: {e}")))
+    }
+
+    /// Reconstruct a bundle from a JSON string produced by `to_json`.
+    #[classmethod]
+    fn from_json(_cls: &Bound<'_, pyo3::types::PyType>, data: &str) -> PyResult<Self> {
+        let inner: PublicKeyBundleInner = serde_json::from_str(data)
+            .map_err(|e| PyValueError::new_err(format!("bundle from_json: {e}")))?;
+        Ok(Self { inner })
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "PublicKeyBundle(id={}, ml_dsa_vk={}B, ml_kem_ek={}B, ed25519_vk={}B, x25519_pk={}B)",
@@ -421,6 +459,57 @@ impl KavachKeyPair {
         let bytes = serde_json::to_vec(&manifest)
             .map_err(|e| PyRuntimeError::new_err(format!("serialize manifest: {e}")))?;
         Ok(PyBytes::new_bound(py, &bytes))
+    }
+
+    /// Serialize the **full keypair, including secret keys**, to bytes.
+    ///
+    /// SECURITY: the returned bytes hold secret signing material. Seal them
+    /// (KMS/HSM, encrypted volume) before persistence and discard the in-memory
+    /// reference once written. Prefer `save_to_file`, which writes an owner-only
+    /// file for you. Rebuild with `KavachKeyPair.from_secret_bytes(...)`.
+    fn to_secret_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let mut buf = self
+            .inner
+            .to_secret_bytes()
+            .map_err(|e| PyRuntimeError::new_err(format!("keypair to_secret_bytes: {e}")))?;
+        // PyBytes copies into Python-owned memory; clear our transient copy.
+        let out = PyBytes::new_bound(py, &buf);
+        buf.zeroize();
+        Ok(out)
+    }
+
+    /// Reconstruct a keypair from bytes produced by `to_secret_bytes`.
+    ///
+    /// The rebuilt keypair has the same `id`, the same `public_keys()`, and the
+    /// same signing identity as the original.
+    #[classmethod]
+    fn from_secret_bytes(_cls: &Bound<'_, pyo3::types::PyType>, data: &[u8]) -> PyResult<Self> {
+        let inner = KavachKeyPairInner::from_secret_bytes(data)
+            .map_err(|e| PyValueError::new_err(format!("keypair from_secret_bytes: {e}")))?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Write the keypair to a file with owner-only permissions (0600 on Unix).
+    ///
+    /// SECURITY: this writes secret key material to disk. Treat the file as any
+    /// private key. An existing file is tightened to owner-only but never
+    /// widened. The transient in-memory buffer is zeroized after the write.
+    fn save_to_file(&self, path: String) -> PyResult<()> {
+        self.inner
+            .save_to_file(&path)
+            .map_err(|e| PyRuntimeError::new_err(format!("keypair save_to_file: {e}")))
+    }
+
+    /// Load a keypair previously written by `save_to_file`.
+    #[classmethod]
+    fn load_from_file(_cls: &Bound<'_, pyo3::types::PyType>, path: String) -> PyResult<Self> {
+        let inner = KavachKeyPairInner::load_from_file(&path)
+            .map_err(|e| PyValueError::new_err(format!("keypair load_from_file: {e}")))?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     fn __repr__(&self) -> String {

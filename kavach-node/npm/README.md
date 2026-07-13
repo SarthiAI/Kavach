@@ -123,6 +123,24 @@ console.assert(!kp.isExpired);
 const bundle = kp.publicKeys();   // PublicKeyBundleView, safe to share
 ```
 
+#### Persisting signer identity across restarts
+
+Persist the identity once and reload the same one on every boot, so the node keeps one stable `keyId` and one continuous audit chain.
+
+```typescript
+import { existsSync } from 'fs';
+import { KavachKeyPair, PqTokenSigner } from 'kavach-sdk';
+
+const keyPath = '/var/lib/kavach/node-signer.key';
+const kp = existsSync(keyPath)
+  ? KavachKeyPair.loadFromFile(keyPath)
+  : (() => { const k = KavachKeyPair.generate(); k.saveToFile(keyPath); return k; })();
+
+const signer = PqTokenSigner.fromKeypairHybrid(kp);
+```
+
+`saveToFile` writes secret key material `0600` (owner-only) on Unix and never widens an existing file's permissions. For a secrets manager, use `kp.toSecretBytes()` (seal it before storage) and `KavachKeyPair.fromSecretBytes(blob)`. A permit or audit entry signed before a restart verifies unchanged afterward. The public bundle moves between processes with `publicBundleToJson(bundle)` / `publicBundleFromJson(...)` or `publicBundleToBytes(bundle)` / `publicBundleFromBytes(...)`, so a central service can pin each node's bundle and independently re-verify every pushed audit chain.
+
 ### Signed audit chain
 
 Append-only, tamper-evident audit log. `verify` rejects tampered entries, wrong keys, and mode mismatches (e.g., a PQ-only verifier on a hybrid chain, which is a silent downgrade).

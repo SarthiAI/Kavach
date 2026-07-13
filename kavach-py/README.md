@@ -129,12 +129,27 @@ Hybrid (`generate_hybrid`) signs with both ML-DSA-65 and Ed25519; a hybrid verif
 
 #### Persisting signer identity across restarts
 
-`KavachKeyPair` does not expose secret-byte serialization in the current `0.1.x` line, so a keypair generated through the Python SDK cannot be persisted and rehydrated through the SDK alone. Two practical patterns:
+Persist the signing identity once and reload the same one on every boot, so the node keeps one stable `key_id` and one continuous audit chain.
 
-- **Regenerate at boot, redistribute the public bundle** (default today). Generate a fresh `KavachKeyPair`, attach it via `PqTokenSigner.from_keypair_hybrid(kp)`, and push `kp.public_keys()` to your verifier pool on every gate-process boot. Verifiers should accept multiple bundles in their `PublicKeyDirectory` and resolve by the `key_id` stamped on each envelope. Old bundles can be retired once permits issued under them have expired (default permit TTL is 30 seconds).
-- **Provision raw key bytes from your KMS / HSM**. The low-level `PqTokenSigner.hybrid(ml_dsa_sk, ml_dsa_vk, ed_sk, ed_vk, key_id=...)` constructor accepts raw bytes; this gives stable identity across restarts but presumes a non-Kavach generator that emits ML-DSA-65 keys interoperable with `kavach-pq`. Do not install third-party Python PQ-crypto libraries (`pqcrypto`, `ml-dsa`, `pyca/cryptography`, etc.) to mint these bytes; interoperability is not guaranteed. The expected path is an HSM with native ML-DSA-65 support.
+```python
+from pathlib import Path
+from kavach import KavachKeyPair, PqTokenSigner
 
-Adding `KavachKeyPair` byte serialization so the first pattern reaches stable identity through the SDK alone is on the [roadmap](https://github.com/SarthiAI/Kavach/blob/main/docs/roadmap.md).
+key_path = "/var/lib/kavach/node-signer.key"
+kp = (KavachKeyPair.load_from_file(key_path)
+      if Path(key_path).exists()
+      else KavachKeyPair.generate())
+if not Path(key_path).exists():
+    kp.save_to_file(key_path)          # written 0600 (owner-only) on Unix
+
+signer = PqTokenSigner.from_keypair_hybrid(kp)
+```
+
+`save_to_file` writes secret key material `0600` and never widens an existing file's permissions; treat the file as any private key. For a secrets manager instead of local disk, use `kp.to_secret_bytes()` (seal it before storage) and `KavachKeyPair.from_secret_bytes(blob)` to rebuild the exact same identity. A permit or audit entry signed before a restart verifies unchanged afterward.
+
+If you would rather not persist secret material, regenerate a fresh `KavachKeyPair` on every boot and push `kp.public_keys()` to your verifier pool, which should accept multiple bundles in its `PublicKeyDirectory` and resolve by the `key_id` stamped on each envelope (old bundles retire once their permits expire, default TTL 30 seconds). That suits single-tenant or rapid-iteration setups; for multi-verifier or regulator-facing deployments, prefer persisting the identity.
+
+The public bundle itself moves between processes as JSON (`bundle.to_json()` / `PublicKeyBundle.from_json(...)`) or self-describing bytes (`bundle.to_bytes()` / `PublicKeyBundle.from_bytes(...)`), so a central service can pin each node's bundle at enrollment and independently re-verify every pushed audit chain.
 
 ### Key pairs
 

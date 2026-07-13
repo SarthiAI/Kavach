@@ -536,6 +536,80 @@ def test_keypair_generate() -> list[bool]:
     return results
 
 
+def test_keypair_and_bundle_persistence() -> list[bool]:
+    print("\n[11b] PublicKeyBundle export + KavachKeyPair persistence (round-trips)")
+    results: list[bool] = []
+    import os
+    import stat
+    import tempfile
+
+    kp = KavachKeyPair.generate()
+    bundle = kp.public_keys()
+
+    # Bundle byte transport round-trip.
+    raw = bundle.to_bytes()
+    results.append(check("bundle.to_bytes returns bytes", isinstance(raw, bytes) and len(raw) > 0))
+    restored = PublicKeyBundle.from_bytes(raw)
+    results.append(check("bundle bytes round-trip preserves id", restored.id == bundle.id))
+    results.append(check("bundle bytes round-trip preserves VK",
+                         restored.ml_dsa_verifying_key == bundle.ml_dsa_verifying_key))
+
+    # Bundle JSON transport round-trip (the enrollment-payload shape).
+    js = bundle.to_json()
+    results.append(check("bundle.to_json returns str", isinstance(js, str) and js.startswith("{")))
+    from_js = PublicKeyBundle.from_json(js)
+    results.append(check("bundle JSON round-trip preserves VK",
+                         from_js.ml_dsa_verifying_key == bundle.ml_dsa_verifying_key))
+
+    # Bad bytes are rejected, not silently mis-parsed.
+    raised = False
+    try:
+        PublicKeyBundle.from_bytes(b"not-a-kvpb-blob")
+    except ValueError:
+        raised = True
+    results.append(check("bundle.from_bytes rejects garbage", raised))
+
+    # Keypair secret-byte round-trip preserves signing identity.
+    token = PermitToken(
+        token_id="00000000-0000-0000-0000-000000000005",
+        evaluation_id="00000000-0000-0000-0000-000000000006",
+        issued_at=1_700_000_000,
+        expires_at=1_700_000_030,
+        action_name="persist_test",
+    )
+    signer_before = PqTokenSigner.from_keypair_hybrid(kp)
+    sig = signer_before.sign(token)
+
+    secret = kp.to_secret_bytes()
+    results.append(check("kp.to_secret_bytes returns bytes", isinstance(secret, bytes) and len(secret) > 0))
+    reloaded = KavachKeyPair.from_secret_bytes(secret)
+    results.append(check("reloaded kp keeps same id", reloaded.id == kp.id))
+    results.append(check("reloaded kp keeps same VK",
+                         reloaded.public_keys().ml_dsa_verifying_key == bundle.ml_dsa_verifying_key))
+    # A signature made before the round-trip verifies under the reloaded key.
+    signer_after = PqTokenSigner.from_keypair_hybrid(reloaded)
+    try:
+        signer_after.verify(token, sig)
+        results.append(check("pre-persist signature verifies under reloaded key", True))
+    except Exception as e:
+        results.append(check(f"pre-persist verify, got {type(e).__name__}: {e}", False))
+
+    # File persistence round-trip + owner-only permissions.
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "node-signer.key")
+        kp.save_to_file(path)
+        results.append(check("save_to_file created the file", os.path.exists(path)))
+        if os.name == "posix":
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+            results.append(check(f"key file is 0600 (got {oct(mode)})", mode == 0o600))
+        from_file = KavachKeyPair.load_from_file(path)
+        results.append(check("load_from_file keeps same id", from_file.id == kp.id))
+        results.append(check("load_from_file keeps same VK",
+                             from_file.public_keys().ml_dsa_verifying_key == bundle.ml_dsa_verifying_key))
+
+    return results
+
+
 # ─── 12. SignedAuditChain, append/verify/export/tamper detection ──────
 
 def test_signed_audit_chain() -> list[bool]:
@@ -1223,6 +1297,7 @@ def main() -> int:
         test_gate_with_signer,
         test_gate_reload,
         test_keypair_generate,
+        test_keypair_and_bundle_persistence,
         test_signed_audit_chain,
         test_secure_channel,
         test_public_key_directory,

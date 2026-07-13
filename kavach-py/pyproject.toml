@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "kavach-sdk"
-version = "0.1.4"
+version = "0.1.5"
 description = "Post-quantum execution boundary enforcement for AI agents, APIs, and distributed systems"
 readme = "README.md"
 requires-python = ">=3.10"

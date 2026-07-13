@@ -151,6 +151,28 @@ export interface AuditEntryOptions {
   evaluationId?: string
   sessionId?: string
 }
+/**
+ * Serialize a public-key bundle to self-describing bytes (public material
+ * only). Safe to share; move to a verifier process and rebuild with
+ * `publicBundleFromBytes(...)`.
+ */
+export declare function publicBundleToBytes(bundle: PublicKeyBundleView): Buffer
+/**
+ * Reconstruct a public-key bundle from bytes produced by
+ * `publicBundleToBytes`.
+ */
+export declare function publicBundleFromBytes(data: Buffer): PublicKeyBundleView
+/**
+ * Serialize a public-key bundle to a JSON string (public material only). This
+ * is the shape a control plane can carry inside a JSON enrollment payload;
+ * rebuild with `publicBundleFromJson(...)`.
+ */
+export declare function publicBundleToJson(bundle: PublicKeyBundleView): string
+/**
+ * Reconstruct a public-key bundle from a JSON string produced by
+ * `publicBundleToJson`.
+ */
+export declare function publicBundleFromJson(data: string): PublicKeyBundleView
 /** Options for `ManagedAuditChain`. */
 export interface ManagedAuditOptions {
   /** ML-DSA + Ed25519 (default true) vs ML-DSA only. */
@@ -234,6 +256,32 @@ export declare class KavachKeyPair {
    * `mlDsaVerifyingKey`. The signing seed never crosses the FFI.
    */
   buildSignedManifest(bundles: Array<PublicKeyBundleView>): Buffer
+  /**
+   * Serialize the **full keypair, including secret keys**, to bytes.
+   *
+   * SECURITY: the returned Buffer holds secret signing material. Seal it
+   * (KMS/HSM, encrypted volume) before persistence and discard the reference
+   * once written. Prefer `saveToFile`, which writes an owner-only file.
+   * Rebuild with `KavachKeyPair.fromSecretBytes(...)`.
+   */
+  toSecretBytes(): Buffer
+  /**
+   * Reconstruct a keypair from bytes produced by `toSecretBytes`.
+   *
+   * The rebuilt keypair has the same `id`, the same `publicKeys()`, and the
+   * same signing identity as the original.
+   */
+  static fromSecretBytes(data: Buffer): KavachKeyPair
+  /**
+   * Write the keypair to a file with owner-only permissions (0600 on Unix).
+   *
+   * SECURITY: this writes secret key material to disk. Treat the file as any
+   * private key. An existing file is tightened to owner-only but never
+   * widened. The transient in-memory buffer is zeroized after the write.
+   */
+  saveToFile(path: string): void
+  /** Load a keypair previously written by `saveToFile`. */
+  static loadFromFile(path: string): KavachKeyPair
 }
 /**
  * PQ token signer, wraps `kavach_pq::PqTokenSigner` and exposes

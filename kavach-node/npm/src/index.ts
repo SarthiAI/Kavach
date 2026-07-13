@@ -36,6 +36,10 @@ import {
   SecureChannel,
   SignedAuditChain,
   spawnInvalidationListener as spawnInvalidationListenerRaw,
+  publicBundleToBytes,
+  publicBundleFromBytes,
+  publicBundleToJson,
+  publicBundleFromJson,
   type ActionContextInput,
   type AuditEntryOptions,
   type ManagedAuditOptions,
@@ -160,6 +164,10 @@ export {
   DirectoryTokenVerifier,
   InMemoryInvalidationBroadcaster,
   InvalidationListenerHandle,
+  publicBundleToBytes,
+  publicBundleFromBytes,
+  publicBundleToJson,
+  publicBundleFromJson,
 };
 export type {
   AuditEntryOptions,

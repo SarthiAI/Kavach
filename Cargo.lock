@@ -1462,7 +1462,7 @@ dependencies = [
 
 [[package]]
 name = "kavach-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1481,7 +1481,7 @@ dependencies = [
 
 [[package]]
 name = "kavach-http"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "actix-web",
  "async-trait",
@@ -1504,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "kavach-mcp"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1518,7 +1518,7 @@ dependencies = [
 
 [[package]]
 name = "kavach-node"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "kavach-core",
@@ -1534,7 +1534,7 @@ dependencies = [
 
 [[package]]
 name = "kavach-pq"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-trait",
  "chacha20poly1305",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "kavach-py"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "kavach-core",
@@ -1577,11 +1577,12 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
 name = "kavach-redis"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-trait",
  "chrono",

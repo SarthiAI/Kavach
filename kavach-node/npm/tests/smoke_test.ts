@@ -32,11 +32,15 @@ import {
   SecureChannel,
   SignedAuditChain,
   spawnInvalidationListener,
+  publicBundleToBytes,
+  publicBundleFromBytes,
+  publicBundleToJson,
+  publicBundleFromJson,
   type InvalidationScopeView,
   type PermitTokenInput,
 } from '../src/index';
 import { randomUUID } from 'crypto';
-import { writeFileSync, readFileSync, unlinkSync, mkdtempSync } from 'fs';
+import { writeFileSync, readFileSync, unlinkSync, mkdtempSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -516,6 +520,81 @@ async function runExpiryCheck(): Promise<void> {
   await new Promise(r => setTimeout(r, 1500));
   check('short-lived kp expired after 1.5s', shortKp.isExpired === true);
 }
+
+// ─── 11b. PublicKeyBundle export + KavachKeyPair persistence ───────────
+
+section('[11b] PublicKeyBundle export + KavachKeyPair persistence (round-trips)');
+
+const persistKp = KavachKeyPair.generate();
+const persistBundle = persistKp.publicKeys();
+
+// Bundle byte transport round-trip.
+const bundleBytes = publicBundleToBytes(persistBundle);
+check('publicBundleToBytes returns a Buffer', Buffer.isBuffer(bundleBytes) && bundleBytes.length > 0);
+const bundleRestored = publicBundleFromBytes(bundleBytes);
+check('bundle bytes round-trip preserves id', bundleRestored.id === persistBundle.id);
+check('bundle bytes round-trip preserves VK',
+  Buffer.from(bundleRestored.mlDsaVerifyingKey).equals(Buffer.from(persistBundle.mlDsaVerifyingKey)));
+
+// Bundle JSON transport round-trip (the enrollment-payload shape).
+const bundleJson = publicBundleToJson(persistBundle);
+check('publicBundleToJson returns a JSON string',
+  typeof bundleJson === 'string' && bundleJson.startsWith('{'));
+const bundleFromJson = publicBundleFromJson(bundleJson);
+check('bundle JSON round-trip preserves VK',
+  Buffer.from(bundleFromJson.mlDsaVerifyingKey).equals(Buffer.from(persistBundle.mlDsaVerifyingKey)));
+
+// Garbage bytes are rejected, not silently mis-parsed.
+let bundleRejected = false;
+try {
+  publicBundleFromBytes(Buffer.from('not-a-kvpb-blob'));
+} catch {
+  bundleRejected = true;
+}
+check('publicBundleFromBytes rejects garbage', bundleRejected);
+
+// Keypair secret-byte round-trip preserves signing identity.
+const persistToken: PermitTokenInput = {
+  tokenId: '00000000-0000-0000-0000-000000000005',
+  evaluationId: '00000000-0000-0000-0000-000000000006',
+  issuedAt: 1_700_000_000,
+  expiresAt: 1_700_000_030,
+  actionName: 'persist_test',
+};
+const signerBefore = PqTokenSigner.fromKeypairHybrid(persistKp);
+const persistSig = signerBefore.sign(persistToken);
+
+const secretBytes = persistKp.toSecretBytes();
+check('toSecretBytes returns a Buffer', Buffer.isBuffer(secretBytes) && secretBytes.length > 0);
+const reloadedKp = KavachKeyPair.fromSecretBytes(secretBytes);
+check('reloaded kp keeps same id', reloadedKp.id === persistKp.id);
+check('reloaded kp keeps same VK',
+  Buffer.from(reloadedKp.publicKeys().mlDsaVerifyingKey)
+    .equals(Buffer.from(persistBundle.mlDsaVerifyingKey)));
+let reloadVerifyOk = false;
+try {
+  PqTokenSigner.fromKeypairHybrid(reloadedKp).verify(persistToken, persistSig);
+  reloadVerifyOk = true;
+} catch (e) {
+  console.error('reloaded-key verify threw:', e);
+}
+check('pre-persist signature verifies under reloaded key', reloadVerifyOk);
+
+// File persistence round-trip + owner-only permissions.
+const persistDir = mkdtempSync(join(tmpdir(), 'kavach-key-'));
+const keyPath = join(persistDir, 'node-signer.key');
+persistKp.saveToFile(keyPath);
+check('saveToFile created the file', statSync(keyPath).isFile());
+if (process.platform !== 'win32') {
+  const mode = statSync(keyPath).mode & 0o777;
+  check(`key file is 0600 (got ${mode.toString(8)})`, mode === 0o600);
+}
+const fromFileKp = KavachKeyPair.loadFromFile(keyPath);
+check('loadFromFile keeps same id', fromFileKp.id === persistKp.id);
+check('loadFromFile keeps same VK',
+  Buffer.from(fromFileKp.publicKeys().mlDsaVerifyingKey)
+    .equals(Buffer.from(persistBundle.mlDsaVerifyingKey)));
+unlinkSync(keyPath);
 
 // ─── 12. SignedAuditChain, append/verify/export/tamper detection ──────
 

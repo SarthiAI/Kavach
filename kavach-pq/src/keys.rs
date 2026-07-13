@@ -153,6 +153,202 @@ impl KavachKeyPair {
             expires_at: self.expires_at,
         }
     }
+
+    /// Serialize the **full keypair, including secret keys**, to self-describing
+    /// bytes.
+    ///
+    /// # Security
+    ///
+    /// The returned buffer contains private signing and decapsulation key
+    /// material. It is as sensitive as any raw private key: never log it, never
+    /// send it over an unauthenticated channel, and zeroize or drop it as soon
+    /// as it has been persisted. Prefer [`KavachKeyPair::save_to_file`], which
+    /// writes to an owner-only file and clears its transient buffer for you.
+    ///
+    /// Round-trips exactly through [`KavachKeyPair::from_secret_bytes`].
+    pub fn to_secret_bytes(&self) -> Result<Vec<u8>> {
+        let wire = SecretKeyPairWire {
+            id: self.id.clone(),
+            created_at: self.created_at,
+            expires_at: self.expires_at,
+            ml_dsa_signing_key: self.ml_dsa_signing_key.clone(),
+            ml_dsa_verifying_key: self.ml_dsa_verifying_key.clone(),
+            ml_kem_decapsulation_key: self.ml_kem_decapsulation_key.clone(),
+            ml_kem_encapsulation_key: self.ml_kem_encapsulation_key.clone(),
+            ed25519_signing_key: self.ed25519_signing_key.clone(),
+            ed25519_verifying_key: self.ed25519_verifying_key.clone(),
+            x25519_secret_key: self.x25519_secret_key.clone(),
+            x25519_public_key: self.x25519_public_key.clone(),
+        };
+        let mut body = serde_json::to_vec(&wire)
+            .map_err(|e| PqError::Serialization(format!("keypair encode: {e}")))?;
+        // `wire` zeroizes its secret vecs on drop at end of scope.
+        let mut out = Vec::with_capacity(SECRET_KEYPAIR_MAGIC.len() + 1 + body.len());
+        out.extend_from_slice(SECRET_KEYPAIR_MAGIC);
+        out.push(SECRET_KEYPAIR_VERSION);
+        out.extend_from_slice(&body);
+        // The header+body copy now lives in `out`; clear the intermediate.
+        body.zeroize();
+        Ok(out)
+    }
+
+    /// Reconstruct a keypair from bytes produced by
+    /// [`KavachKeyPair::to_secret_bytes`].
+    ///
+    /// Verifies the magic prefix and version before decoding. The reconstructed
+    /// keypair is identical to the original: same `id`, same `public_keys()`,
+    /// and it signs with the same identity.
+    pub fn from_secret_bytes(data: &[u8]) -> Result<Self> {
+        let header_len = SECRET_KEYPAIR_MAGIC.len() + 1;
+        if data.len() < header_len {
+            return Err(PqError::Serialization(
+                "keypair blob too short for header".into(),
+            ));
+        }
+        if &data[..SECRET_KEYPAIR_MAGIC.len()] != SECRET_KEYPAIR_MAGIC {
+            return Err(PqError::Serialization(
+                "keypair magic mismatch (not a KVSK blob)".into(),
+            ));
+        }
+        let version = data[SECRET_KEYPAIR_MAGIC.len()];
+        if version != SECRET_KEYPAIR_VERSION {
+            return Err(PqError::Serialization(format!(
+                "unsupported keypair version {version}, expected {SECRET_KEYPAIR_VERSION}"
+            )));
+        }
+        let wire: SecretKeyPairWire = serde_json::from_slice(&data[header_len..])
+            .map_err(|e| PqError::Serialization(format!("keypair decode: {e}")))?;
+        // Clone out of `wire` before it drops and zeroizes its secret vecs.
+        Ok(Self {
+            id: wire.id.clone(),
+            created_at: wire.created_at,
+            expires_at: wire.expires_at,
+            ml_dsa_signing_key: wire.ml_dsa_signing_key.clone(),
+            ml_dsa_verifying_key: wire.ml_dsa_verifying_key.clone(),
+            ml_kem_decapsulation_key: wire.ml_kem_decapsulation_key.clone(),
+            ml_kem_encapsulation_key: wire.ml_kem_encapsulation_key.clone(),
+            ed25519_signing_key: wire.ed25519_signing_key.clone(),
+            ed25519_verifying_key: wire.ed25519_verifying_key.clone(),
+            x25519_secret_key: wire.x25519_secret_key.clone(),
+            x25519_public_key: wire.x25519_public_key.clone(),
+        })
+    }
+
+    /// Write the keypair to a file with owner-only permissions.
+    ///
+    /// On Unix the file is created `0600` (owner read/write only). If the file
+    /// already exists, its permissions are tightened to owner-only but never
+    /// widened, so a caller who has pre-restricted the file (for example to
+    /// `0400`) is not silently opened up.
+    ///
+    /// # Security
+    ///
+    /// This writes **secret key material** to disk. Treat the resulting file as
+    /// you would any private key: store it on an encrypted volume or behind a
+    /// KMS/HSM, restrict access, and back it up securely. The transient
+    /// in-memory buffer is zeroized after the write.
+    pub fn save_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        use std::io::Write;
+        let path = path.as_ref();
+        let mut buf = self.to_secret_bytes()?;
+
+        #[cfg(unix)]
+        let existing_mode = {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(path)
+                .ok()
+                .map(|m| m.permissions().mode() & 0o777)
+        };
+
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+
+        let write_result = (|| -> Result<()> {
+            let mut f = opts.open(path).map_err(|e| {
+                PqError::Serialization(format!("open key file {}: {e}", path.display()))
+            })?;
+            f.write_all(&buf).map_err(|e| {
+                PqError::Serialization(format!("write key file {}: {e}", path.display()))
+            })?;
+            f.sync_all().map_err(|e| {
+                PqError::Serialization(format!("sync key file {}: {e}", path.display()))
+            })?;
+            Ok(())
+        })();
+        // Clear the plaintext secret buffer regardless of write outcome.
+        buf.zeroize();
+        write_result?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Owner-only, and never add bits an existing file did not already have.
+            let target = match existing_mode {
+                Some(cur) => cur & 0o600,
+                None => 0o600,
+            };
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(target)).map_err(
+                |e| PqError::Serialization(format!("chmod key file {}: {e}", path.display())),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Load a keypair previously written by [`KavachKeyPair::save_to_file`].
+    ///
+    /// The on-disk bytes hold secret key material; they are read into a
+    /// transient buffer that is zeroized before this returns.
+    pub fn load_from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let mut buf = std::fs::read(path)
+            .map_err(|e| PqError::Serialization(format!("read key file {}: {e}", path.display())))?;
+        let result = Self::from_secret_bytes(&buf);
+        buf.zeroize();
+        result
+    }
+}
+
+/// Magic prefix for the secret keypair byte form ("KVSK" = Kavach Secret
+/// Keypair). Distinguishes the blob and marks it as carrying secret material.
+const SECRET_KEYPAIR_MAGIC: &[u8; 4] = b"KVSK";
+
+/// Format version of the secret keypair byte form. Bump on any incompatible
+/// layout change after the header.
+const SECRET_KEYPAIR_VERSION: u8 = 1;
+
+/// Serde wire form for the full keypair, **including secret keys**.
+///
+/// Kept private and separate from [`KavachKeyPair`] so the public type never
+/// gains a blanket `Serialize` that could leak secrets through an unrelated
+/// serializer. The secret vecs are zeroized when this wire struct drops.
+#[derive(Serialize, Deserialize)]
+struct SecretKeyPairWire {
+    id: String,
+    created_at: DateTime<Utc>,
+    expires_at: Option<DateTime<Utc>>,
+    ml_dsa_signing_key: Vec<u8>,
+    ml_dsa_verifying_key: Vec<u8>,
+    ml_kem_decapsulation_key: Vec<u8>,
+    ml_kem_encapsulation_key: Vec<u8>,
+    ed25519_signing_key: Vec<u8>,
+    ed25519_verifying_key: Vec<u8>,
+    x25519_secret_key: Vec<u8>,
+    x25519_public_key: Vec<u8>,
+}
+
+impl Drop for SecretKeyPairWire {
+    fn drop(&mut self) {
+        self.ml_dsa_signing_key.zeroize();
+        self.ml_kem_decapsulation_key.zeroize();
+        self.ed25519_signing_key.zeroize();
+        self.x25519_secret_key.zeroize();
+    }
 }
 
 impl Drop for KavachKeyPair {
@@ -166,7 +362,7 @@ impl Drop for KavachKeyPair {
 }
 
 /// Public keys that can be shared with other services.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicKeyBundle {
     pub id: String,
     pub ml_dsa_verifying_key: Vec<u8>,
@@ -175,6 +371,64 @@ pub struct PublicKeyBundle {
     pub x25519_public_key: Vec<u8>,
     pub created_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// Magic prefix for the self-describing `PublicKeyBundle` byte form.
+///
+/// "KVPB" = Kavach Public Bundle. Present so a stray blob can be told apart
+/// from other serializations, and so a future format revision is
+/// distinguishable from this one.
+const PUBLIC_BUNDLE_MAGIC: &[u8; 4] = b"KVPB";
+
+/// Format version of the `PublicKeyBundle` byte form. Bump when the layout
+/// after the header changes in a non-backward-compatible way.
+const PUBLIC_BUNDLE_VERSION: u8 = 1;
+
+impl PublicKeyBundle {
+    /// Serialize this bundle to self-describing bytes (public material only).
+    ///
+    /// The output is a 5-byte header (`b"KVPB"` + a one-byte version) followed
+    /// by the JSON encoding of the bundle. It carries only public keys and is
+    /// safe to share; there is no path by which secret material reaches this
+    /// output because the bundle itself holds none.
+    ///
+    /// Round-trips exactly through [`PublicKeyBundle::from_bytes`].
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let body = serde_json::to_vec(self)
+            .map_err(|e| PqError::Serialization(format!("public bundle encode: {e}")))?;
+        let mut out = Vec::with_capacity(PUBLIC_BUNDLE_MAGIC.len() + 1 + body.len());
+        out.extend_from_slice(PUBLIC_BUNDLE_MAGIC);
+        out.push(PUBLIC_BUNDLE_VERSION);
+        out.extend_from_slice(&body);
+        Ok(out)
+    }
+
+    /// Reconstruct a bundle from bytes produced by [`PublicKeyBundle::to_bytes`].
+    ///
+    /// Verifies the magic prefix and version before decoding, so an unrelated
+    /// or future-format blob is rejected with a clear error rather than
+    /// silently mis-parsed.
+    pub fn from_bytes(data: &[u8]) -> Result<Self> {
+        let header_len = PUBLIC_BUNDLE_MAGIC.len() + 1;
+        if data.len() < header_len {
+            return Err(PqError::Serialization(
+                "public bundle too short for header".into(),
+            ));
+        }
+        if &data[..PUBLIC_BUNDLE_MAGIC.len()] != PUBLIC_BUNDLE_MAGIC {
+            return Err(PqError::Serialization(
+                "public bundle magic mismatch (not a KVPB blob)".into(),
+            ));
+        }
+        let version = data[PUBLIC_BUNDLE_MAGIC.len()];
+        if version != PUBLIC_BUNDLE_VERSION {
+            return Err(PqError::Serialization(format!(
+                "unsupported public bundle version {version}, expected {PUBLIC_BUNDLE_VERSION}"
+            )));
+        }
+        serde_json::from_slice(&data[header_len..])
+            .map_err(|e| PqError::Serialization(format!("public bundle decode: {e}")))
+    }
 }
 
 /// In-memory key store with rotation support.
